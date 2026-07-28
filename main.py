@@ -28,6 +28,7 @@ from audit.store import AuditStore
 from audit.trace import TraceReconstructor
 from approval.queue import ApprovalQueue
 from approval.routes import router as approval_router, init_routes
+from orchestrator.context_store import PipelineContextStore
 
 # Import tools to register them
 import tools.citation_lookup
@@ -45,15 +46,13 @@ audit_store: AuditStore | None = None
 approval_queue: ApprovalQueue | None = None
 pipeline: Pipeline | None = None
 trace_reconstructor: TraceReconstructor | None = None
-
-# In-memory store for active pipeline contexts (keyed by trace_id)
-active_pipelines: dict[str, PipelineContext] = {}
+context_store: PipelineContextStore | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize all components on startup."""
-    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor
+    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor, context_store
 
     logger.info("Initializing Legal RAG system...")
 
@@ -61,6 +60,10 @@ async def lifespan(app: FastAPI):
     vector_store = VectorStore()
     audit_store = AuditStore(db_path=settings.sqlite_db_path)
     approval_queue = ApprovalQueue(db_path=settings.sqlite_db_path)
+    context_store = PipelineContextStore(db_path=settings.sqlite_db_path)
+
+    # Evict expired contexts on startup
+    context_store.evict_old(hours=24)
 
     # Initialize agents
     retrieval_agent = RetrievalAgent(vector_store=vector_store)
@@ -94,8 +97,8 @@ async def lifespan(app: FastAPI):
 
     trace_reconstructor = TraceReconstructor(audit_store)
 
-    # Initialize approval routes
-    init_routes(approval_queue)
+    # Initialize approval routes with queue, pipeline, and context store
+    init_routes(approval_queue, pipeline, context_store)
 
     logger.info("Legal RAG system initialized successfully")
     yield
@@ -175,8 +178,9 @@ async def submit_query(request: QueryRequest):
         user_permitted_matters=request.permitted_matters,
     )
 
-    # Store context for status lookups
-    active_pipelines[ctx.trace_id] = ctx
+    # Store context for status lookups and approval resumption
+    if context_store:
+        context_store.save(ctx)
 
     # Build response
     answer = None
@@ -198,7 +202,7 @@ async def submit_query(request: QueryRequest):
 @app.get("/query/{trace_id}/status")
 async def query_status(trace_id: str):
     """Check pipeline status for a query."""
-    ctx = active_pipelines.get(trace_id)
+    ctx = context_store.get(trace_id) if context_store else None
     if not ctx:
         raise HTTPException(status_code=404, detail="Trace not found")
 
@@ -214,7 +218,7 @@ async def query_status(trace_id: str):
 @app.get("/query/{trace_id}/result")
 async def query_result(trace_id: str):
     """Get the final result for a query."""
-    ctx = active_pipelines.get(trace_id)
+    ctx = context_store.get(trace_id) if context_store else None
     if not ctx:
         raise HTTPException(status_code=404, detail="Trace not found")
 
