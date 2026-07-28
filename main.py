@@ -343,6 +343,7 @@ async def ingest_file(
             "status": "success",
             "doc_id": doc_id,
             "filename": file.filename,
+            "chunks_count": result.get("total_chunks", 0),
             "pages_extracted": extracted.get("pages", 1),
             "file_type": extracted.get("file_type", "unknown"),
             **result,
