@@ -207,6 +207,14 @@ async def submit_query(request: QueryRequest):
     answer = None
     claims = None
 
+    if ctx.analysis_result and ctx.state == PipelineState.COMPLETE:
+        answer = ctx.analysis_result.answer_draft
+        claims = [c.model_dump() for c in ctx.analysis_result.claims]
+    elif ctx.state == PipelineState.AWAITING_APPROVAL:
+        answer = "Tool action generated. This action requires human sign-off in the Approval Queue before execution."
+    elif ctx.error:
+        answer = f"Pipeline stopped: {ctx.error}"
+
     # If session_id provided, record messages into session store
     if request.session_id and session_store:
         session_store.add_message(

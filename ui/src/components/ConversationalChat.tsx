@@ -122,10 +122,23 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
       clearTimeout(stepTimer3);
 
       if (res.ok) {
-        await res.json();
+        const data = await res.json();
         setCurrentStep('complete');
         if (targetSessionId) {
-          fetchMessages(targetSessionId);
+          await fetchMessages(targetSessionId);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              message_id: `msg_${Date.now()}`,
+              session_id: 'default',
+              role: 'assistant',
+              content: data.answer || 'No response returned from analysis.',
+              trace_id: data.trace_id,
+              timestamp: new Date().toISOString(),
+              metadata: { claims: data.claims || [], status: data.status },
+            },
+          ]);
         }
       } else {
         const errData = await res.json();
