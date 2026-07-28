@@ -210,32 +210,3 @@ def build_validator_context(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ]
-
-
-def build_tool_exec_context(tool_action_request: dict) -> list[dict[str, str]]:
-    """
-    Build context for the tool-exec agent.
-
-    CRITICAL: This context contains ONLY the structured tool_action_request
-    payload. It NEVER includes raw chunk text. Even if an injection attempt
-    survived every prior layer, there is nothing in this context that looks
-    like document content to be confused by.
-    """
-    system_prompt = (
-        "You are a tool execution agent. You execute exactly the tool call "
-        "specified in the request below. Do not deviate from the requested "
-        "tool or parameters. Report the result accurately."
-    )
-
-    user_message = (
-        f"Execute this tool action:\n"
-        f"Tool: {tool_action_request.get('tool_name')}\n"
-        f"Parameters: {tool_action_request.get('parameters')}\n"
-        f"Requested by: {tool_action_request.get('requested_by')}\n"
-        f"Validated by: {tool_action_request.get('validated_by')}\n"
-    )
-
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
-    ]
