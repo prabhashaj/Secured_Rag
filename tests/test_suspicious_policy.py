@@ -16,6 +16,7 @@ from schemas.envelope import TrustLevel
 from schemas.retrieval import RetrievalResult, Chunk, ConfidentialityTag
 from schemas.injection import InjectionScanResult, InjectionVerdict, InjectionSignal, InjectionAction
 from schemas.analysis import AnalysisResult, Claim, ProposedAction, ActionType
+from schemas.validation import ValidationVerdict
 
 
 @pytest.fixture
