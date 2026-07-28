@@ -291,14 +291,11 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
               AI
             </div>
             <div>
-              <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                <span>Legal Assistant AI</span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
-                  Trust Boundaries Enforced
-                </span>
+              <div className="font-bold text-slate-900 text-sm">
+                Legal AI Assistant
               </div>
               <div className="text-[11px] text-slate-400 font-medium">
-                Scoped agent pipeline • Grounded claims • Audit logging enabled
+                Grounded Document RAG
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ConversationalChat } from './components/ConversationalChat';
@@ -13,34 +13,11 @@ import { UserProfileDrawer } from './components/UserProfileDrawer';
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('query');
-  const [vectorCount, setVectorCount] = useState<number>(0);
-  const [auditCount, setAuditCount] = useState<number>(0);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
 
   const { user } = useAuth();
-
-  const fetchHealth = async () => {
-    setIsRefreshing(true);
-    try {
-      const res = await fetch('/health');
-      if (res.ok) {
-        const data = await res.json();
-        setVectorCount(data.vector_store_count || 0);
-        setAuditCount(data.audit_log_count || 0);
-      }
-    } catch (e) {
-      console.error('Health fetch error', e);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchHealth();
-  }, []);
 
   const handleOpenAuditTrace = (_traceId: string) => {
     setActiveTab('audit');
@@ -54,13 +31,9 @@ const AppContent: React.FC = () => {
         pendingApprovalsCount={0}
       />
 
-      <div className="main-content flex-1 ml-72 flex flex-col min-h-screen">
+      <div className="main-content flex-1 ml-64 flex flex-col min-h-screen">
         <Header
           activeTab={activeTab}
-          vectorCount={vectorCount}
-          auditCount={auditCount}
-          onRefresh={fetchHealth}
-          isRefreshing={isRefreshing}
           onOpenAuth={() => setIsAuthOpen(true)}
           onOpenProfile={() => setIsProfileOpen(true)}
         />
@@ -86,9 +59,7 @@ const AppContent: React.FC = () => {
       <FileUploadDrawer
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onSuccess={() => {
-          fetchHealth();
-        }}
+        onSuccess={() => {}}
       />
 
       <AuthModal
