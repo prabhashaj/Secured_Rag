@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Mistral AI
-    mistral_api_key: str = Field(default="REDACTED_API_KEY", description="Mistral API key")
+    mistral_api_key: str = Field(..., description="Mistral API key — required, no default")
     mistral_large_model: str = Field(
         default="mistral-large-latest",
         description="Model for analysis and validation agents",
