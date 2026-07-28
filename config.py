@@ -3,6 +3,7 @@ Configuration for the Legal RAG system.
 Loads settings from environment variables / .env file.
 """
 
+from typing import Literal
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -56,6 +57,10 @@ class Settings(BaseSettings):
     injection_suspicious_threshold: float = Field(
         default=0.4,
         description="Confidence threshold above which a chunk is flagged suspicious",
+    )
+    suspicious_chunk_policy: Literal["pass_through", "flag_in_answer", "quarantine"] = Field(
+        default="pass_through",
+        description="Policy for handling chunks flagged suspicious by injection classifier",
     )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

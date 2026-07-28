@@ -35,6 +35,8 @@ from orchestrator.trust_boundary import (
     TrustBoundaryViolation,
 )
 
+from config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -249,8 +251,15 @@ class Pipeline:
             ctx.message_log.append(envelope)
             await self._log_to_audit(envelope)
 
-            # Only pass through clean and suspicious chunks
+            # Handle suspicious chunk policy
+            policy = getattr(settings, "suspicious_chunk_policy", "pass_through")
+
             if scan_result.action_taken == InjectionAction.PASSED_THROUGH:
+                if policy == "quarantine" and scan_result.verdict == InjectionVerdict.SUSPICIOUS:
+                    logger.info(
+                        f"[trace={ctx.trace_id}] Quarantining suspicious chunk {chunk.chunk_id} per policy"
+                    )
+                    continue
                 clean_chunks.append(chunk)
 
         ctx.clean_chunks = clean_chunks
@@ -273,6 +282,20 @@ class Pipeline:
             chunks=ctx.clean_chunks,
             session_memory=session_memory,
         )
+
+        policy = getattr(settings, "suspicious_chunk_policy", "pass_through")
+        if policy == "flag_in_answer" and analysis_result and analysis_result.answer_draft:
+            suspicious_ids = [
+                s.chunk_id for s in ctx.scan_results
+                if s.verdict == InjectionVerdict.SUSPICIOUS
+            ]
+            if suspicious_ids:
+                banner = (
+                    f"\n\n[WARNING: This answer draws on content flagged as potentially suspicious "
+                    f"(chunk_id: {', '.join(suspicious_ids)}) — verify independently]"
+                )
+                analysis_result.answer_draft += banner
+
         ctx.analysis_result = analysis_result
 
         envelope = create_envelope(
