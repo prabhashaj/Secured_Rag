@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, FilePlus, ShieldCheck, History } from 'lucide-react';
+import { Search, FileText, FilePlus, ShieldCheck, History } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
@@ -14,6 +14,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems = [
     { id: 'query', label: 'Query Assistant', icon: Search, category: 'Core Pipeline' },
+    { id: 'documents', label: 'Uploaded Documents', icon: FileText, category: 'Core Pipeline' },
     { id: 'ingest', label: 'Document Ingestion', icon: FilePlus, category: 'Core Pipeline' },
     { id: 'approvals', label: 'Approval Gate', icon: ShieldCheck, category: 'Governance', badge: pendingApprovalsCount },
     { id: 'audit', label: 'Audit Logs & Traces', icon: History, category: 'Governance' },

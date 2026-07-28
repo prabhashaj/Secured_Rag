@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ConversationalChat } from './components/ConversationalChat';
+import { DocumentsPanel } from './components/DocumentsPanel';
 import { FileUploadDrawer } from './components/FileUploadDrawer';
 import { IngestPanel } from './components/IngestPanel';
 import { ApprovalsPanel } from './components/ApprovalsPanel';
@@ -60,6 +61,11 @@ export const App: React.FC = () => {
             <ConversationalChat
               onOpenUpload={() => setIsUploadOpen(true)}
               onOpenAudit={handleOpenAuditTrace}
+            />
+          )}
+          {activeTab === 'documents' && (
+            <DocumentsPanel
+              onOpenUpload={() => setIsUploadOpen(true)}
             />
           )}
           {activeTab === 'ingest' && <IngestPanel />}

@@ -161,3 +161,46 @@ class VectorStore:
             return self._get_collection().count()
         except Exception:
             return 0
+
+    def get_all_documents(self) -> list[dict]:
+        """Get unique documents summary stored in the vector store."""
+        try:
+            collection = self._get_collection()
+            if collection.count() == 0:
+                return []
+            res = collection.get(include=["metadatas"])
+            if not res or not res.get("metadatas"):
+                return []
+
+            docs_map: dict[str, dict] = {}
+            for meta in res["metadatas"]:
+                if not meta:
+                    continue
+                doc_id = meta.get("source_doc_id", "unknown")
+                if doc_id not in docs_map:
+                    docs_map[doc_id] = {
+                        "source_doc_id": doc_id,
+                        "source_doc_title": meta.get("source_doc_title", "Untitled Document"),
+                        "matter_id": meta.get("matter_id", "General"),
+                        "confidentiality_tag": meta.get("confidentiality_tag", "public"),
+                        "chunks_count": 0,
+                        "injection_flagged": False,
+                    }
+                docs_map[doc_id]["chunks_count"] += 1
+                if meta.get("injection_flagged") in ("True", True):
+                    docs_map[doc_id]["injection_flagged"] = True
+
+            return list(docs_map.values())
+        except Exception as e:
+            logger.error(f"Failed to fetch documents from vector store: {e}")
+            return []
+
+    def delete_document(self, source_doc_id: str) -> bool:
+        """Delete all chunks belonging to a specific source_doc_id."""
+        try:
+            collection = self._get_collection()
+            collection.delete(where={"source_doc_id": source_doc_id})
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete document {source_doc_id}: {e}")
+            return False

@@ -402,6 +402,25 @@ async def delete_chat_session(session_id: str):
     return {"status": "success", "session_id": session_id}
 
 
+@app.get("/documents")
+async def list_documents():
+    """List all ingested documents summary from vector store."""
+    if not vector_store:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    return vector_store.get_all_documents()
+
+
+@app.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    """Delete a document and all its chunks from vector store."""
+    if not vector_store:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    success = vector_store.delete_document(doc_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found or delete failed")
+    return {"status": "success", "doc_id": doc_id}
+
+
 @app.get("/health")
 async def health():
     """Health check."""
