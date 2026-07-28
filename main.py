@@ -29,6 +29,8 @@ from audit.trace import TraceReconstructor
 from approval.queue import ApprovalQueue
 from approval.routes import router as approval_router, init_routes
 from orchestrator.context_store import PipelineContextStore
+from orchestrator.session_store import ChatSessionStore
+from tools.file_extractor import extract_text_from_file
 
 # Import tools to register them
 import tools.citation_lookup
@@ -47,12 +49,13 @@ approval_queue: ApprovalQueue | None = None
 pipeline: Pipeline | None = None
 trace_reconstructor: TraceReconstructor | None = None
 context_store: PipelineContextStore | None = None
+session_store: ChatSessionStore | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize all components on startup."""
-    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor, context_store
+    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor, context_store, session_store
 
     logger.info("Initializing Legal RAG system...")
 
@@ -61,6 +64,7 @@ async def lifespan(app: FastAPI):
     audit_store = AuditStore(db_path=settings.sqlite_db_path)
     approval_queue = ApprovalQueue(db_path=settings.sqlite_db_path)
     context_store = PipelineContextStore(db_path=settings.sqlite_db_path)
+    session_store = ChatSessionStore(db_path=settings.sqlite_db_path)
 
     # Evict expired contexts on startup
     context_store.evict_old(hours=24)
@@ -139,6 +143,7 @@ class QueryRequest(BaseModel):
     """User query request."""
     query: str = Field(description="The legal question to answer")
     user_id: str = Field(default="default_user", description="User identifier")
+    session_id: str | None = Field(default=None, description="Chat session ID")
     permitted_matters: list[str] = Field(
         default_factory=list,
         description="Matter IDs this user can access",
@@ -186,9 +191,25 @@ async def submit_query(request: QueryRequest):
     answer = None
     claims = None
 
-    if ctx.analysis_result and ctx.state == PipelineState.COMPLETE:
-        answer = ctx.analysis_result.answer_draft
-        claims = [c.model_dump() for c in ctx.analysis_result.claims]
+    # If session_id provided, record messages into session store
+    if request.session_id and session_store:
+        session_store.add_message(
+            session_id=request.session_id,
+            role="user",
+            content=request.query,
+        )
+        if answer:
+            session_store.add_message(
+                session_id=request.session_id,
+                role="assistant",
+                content=answer,
+                trace_id=ctx.trace_id,
+                metadata={
+                    "claims": claims or [],
+                    "status": ctx.state.value,
+                    "error": ctx.error,
+                },
+            )
 
     return QueryResponse(
         trace_id=ctx.trace_id,
@@ -290,6 +311,94 @@ async def ingest_doc(request: IngestRequest):
     except Exception as e:
         logger.error(f"Ingestion failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest/file")
+async def ingest_file(
+    file: UploadFile = File(...),
+    matter_id: str = Form(...),
+    confidentiality_tag: str = Form(default="public"),
+    title: str | None = Form(default=None),
+):
+    """Ingest a multi-format document (PDF, DOCX, TXT, MD, CSV, JSON) into vector store."""
+    if not vector_store:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    contents = await file.read()
+    doc_title = title or file.filename or "Uploaded Document"
+
+    try:
+        extracted = extract_text_from_file(contents, file.filename or "doc.txt")
+        doc_id = f"doc_{uuid.uuid4().hex[:8]}"
+
+        result = await ingest_document(
+            text=extracted["text"],
+            source_doc_id=doc_id,
+            source_doc_title=doc_title,
+            matter_id=matter_id,
+            confidentiality_tag=confidentiality_tag,
+            vector_store=vector_store,
+        )
+        return {
+            "status": "success",
+            "doc_id": doc_id,
+            "filename": file.filename,
+            "pages_extracted": extracted.get("pages", 1),
+            "file_type": extracted.get("file_type", "unknown"),
+            **result,
+        }
+    except Exception as e:
+        logger.error(f"File ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CreateSessionRequest(BaseModel):
+    title: str = "New Legal Chat"
+    user_id: str = "default_user"
+    active_matter_id: str | None = None
+
+
+@app.get("/sessions")
+async def list_user_sessions(user_id: str = "default_user"):
+    """List chat sessions for user."""
+    if not session_store:
+        raise HTTPException(status_code=503, detail="Session store not initialized")
+    return session_store.list_sessions(user_id=user_id)
+
+
+@app.post("/sessions")
+async def create_chat_session(req: CreateSessionRequest):
+    """Create a new chat session."""
+    if not session_store:
+        raise HTTPException(status_code=503, detail="Session store not initialized")
+    return session_store.create_session(
+        title=req.title, user_id=req.user_id, active_matter_id=req.active_matter_id
+    )
+
+
+@app.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Get messages for a chat session."""
+    if not session_store:
+        raise HTTPException(status_code=503, detail="Session store not initialized")
+    session = session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session": session,
+        "messages": session_store.get_messages(session_id),
+    }
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_chat_session(session_id: str):
+    """Delete a chat session."""
+    if not session_store:
+        raise HTTPException(status_code=503, detail="Session store not initialized")
+    success = session_store.delete_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "success", "session_id": session_id}
 
 
 @app.get("/health")
