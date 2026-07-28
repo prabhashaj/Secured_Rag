@@ -31,6 +31,8 @@ from approval.routes import router as approval_router, init_routes
 from orchestrator.context_store import PipelineContextStore
 from orchestrator.session_store import ChatSessionStore
 from tools.file_extractor import extract_text_from_file
+from auth.store import UserStore
+from auth.routes import router as auth_router, set_user_store
 
 # Import tools to register them
 import tools.citation_lookup
@@ -50,12 +52,13 @@ pipeline: Pipeline | None = None
 trace_reconstructor: TraceReconstructor | None = None
 context_store: PipelineContextStore | None = None
 session_store: ChatSessionStore | None = None
+user_store: UserStore | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize all components on startup."""
-    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor, context_store, session_store
+    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor, context_store, session_store, user_store
 
     logger.info("Initializing Legal RAG system...")
 
@@ -65,6 +68,18 @@ async def lifespan(app: FastAPI):
     approval_queue = ApprovalQueue(db_path=settings.sqlite_db_path)
     context_store = PipelineContextStore(db_path=settings.sqlite_db_path)
     session_store = ChatSessionStore(db_path=settings.sqlite_db_path)
+    user_store = UserStore(db_path=settings.sqlite_db_path)
+    set_user_store(user_store)
+
+    # Seed demo users if not present
+    demo_users = [
+        ("lawyer1@legal.com", "Jane Doe (Senior Attorney)", "Password123", "Senior Attorney", ["Matter_101", "Matter_102"]),
+        ("paralegal1@legal.com", "Alex Smith (Paralegal)", "Password123", "Paralegal", ["Matter_101"]),
+        ("admin@legal.com", "Chief Compliance Auditor", "Password123", "Compliance Auditor", ["Matter_101", "Matter_102", "Matter_103"]),
+    ]
+    for email, name, pw, role, matters in demo_users:
+        if not user_store.get_user_by_email(email):
+            user_store.create_user(email=email, full_name=name, password=pw, role=role, permitted_matters=matters)
 
     # Evict expired contexts on startup
     context_store.evict_old(hours=24)
@@ -126,6 +141,7 @@ if os.path.exists("ui/dist"):
     app.mount("/assets", StaticFiles(directory="ui/dist/assets"), name="assets")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(approval_router)
+app.include_router(auth_router)
 
 
 @app.get("/", response_class=FileResponse)

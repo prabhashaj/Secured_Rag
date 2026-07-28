@@ -7,13 +7,20 @@ import { FileUploadDrawer } from './components/FileUploadDrawer';
 import { IngestPanel } from './components/IngestPanel';
 import { ApprovalsPanel } from './components/ApprovalsPanel';
 import { AuditPanel } from './components/AuditPanel';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthModal } from './components/AuthModal';
+import { UserProfileDrawer } from './components/UserProfileDrawer';
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('query');
   const [vectorCount, setVectorCount] = useState<number>(0);
   const [auditCount, setAuditCount] = useState<number>(0);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
+  const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
+  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+
+  const { user } = useAuth();
 
   const fetchHealth = async () => {
     setIsRefreshing(true);
@@ -54,6 +61,8 @@ export const App: React.FC = () => {
           auditCount={auditCount}
           onRefresh={fetchHealth}
           isRefreshing={isRefreshing}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onOpenProfile={() => setIsProfileOpen(true)}
         />
 
         <main className="p-6 flex-1 flex flex-col">
@@ -81,7 +90,25 @@ export const App: React.FC = () => {
           fetchHealth();
         }}
       />
+
+      <AuthModal
+        isOpen={isAuthOpen || !user}
+        onClose={() => setIsAuthOpen(false)}
+      />
+
+      <UserProfileDrawer
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+      />
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 

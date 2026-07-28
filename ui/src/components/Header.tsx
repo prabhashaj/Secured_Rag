@@ -1,5 +1,6 @@
 import React from 'react';
-import { RefreshCw, Server, Database } from 'lucide-react';
+import { RefreshCw, Server, Database, LogIn } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface HeaderProps {
   activeTab: string;
@@ -7,6 +8,8 @@ interface HeaderProps {
   auditCount: number;
   onRefresh: () => void;
   isRefreshing: boolean;
+  onOpenProfile: () => void;
+  onOpenAuth: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -15,9 +18,14 @@ export const Header: React.FC<HeaderProps> = ({
   auditCount,
   onRefresh,
   isRefreshing,
+  onOpenProfile,
+  onOpenAuth,
 }) => {
+  const { user } = useAuth();
+
   const titles: Record<string, { main: string; sub: string }> = {
     query: { main: 'Query Assistant', sub: 'ACL-Filtered Multi-Agent RAG Pipeline' },
+    documents: { main: 'Uploaded Documents', sub: 'Multi-Format Legal File Repository' },
     ingest: { main: 'Document Ingestion', sub: 'Embed, Tag Scope & Ingestion Scan' },
     approvals: { main: 'Human Approval Gate', sub: 'Manual Compliance Sign-Off Queue' },
     audit: { main: 'Audit Log & Trace Inspection', sub: 'Full Message Trajectory Reconstruction' },
@@ -50,11 +58,34 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-soft-sm transition-all active:scale-95 disabled:opacity-50"
+          className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-soft-sm transition-all active:scale-95 disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-brand-600' : ''}`} />
-          <span>Refresh Health</span>
+          <span>Refresh</span>
         </button>
+
+        {user ? (
+          <button
+            onClick={onOpenProfile}
+            className="flex items-center gap-2.5 px-3.5 py-1.5 bg-brand-50 hover:bg-brand-100/80 border border-brand-200 rounded-xl text-xs font-bold text-brand-900 transition-all shadow-sm"
+          >
+            <div className="w-7 h-7 rounded-lg bg-brand-600 text-white font-bold flex items-center justify-center text-xs">
+              {user.full_name.slice(0, 2).toUpperCase()}
+            </div>
+            <div className="text-left hidden sm:block">
+              <span className="block leading-tight">{user.full_name}</span>
+              <span className="text-[10px] text-brand-700 font-medium block leading-tight">{user.role}</span>
+            </div>
+          </button>
+        ) : (
+          <button
+            onClick={onOpenAuth}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-md shadow-brand-500/20 transition-all"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Sign In</span>
+          </button>
+        )}
       </div>
     </header>
   );
