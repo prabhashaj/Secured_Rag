@@ -1,0 +1,32 @@
+# Secrets and Environment Files
+.env
+*.env
+
+# Python / Pytest
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Databases & Persisted Vector Stores
+audit.db
+chroma_data/
+
+# Packaging & Build outputs
+*.egg-info/
+dist/
+build/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

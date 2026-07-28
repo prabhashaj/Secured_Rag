@@ -1,0 +1,48 @@
+1. Overall shape: layered multi-agent system
+
+Don't build one agent that does everything. Split by trust level and responsibility:
+
+Orchestrator agent – routes requests, holds no direct tool access, never sees raw untrusted document text directly (only summaries/results from subordinate agents)
+Retrieval agent – queries the vector store / search index, returns candidate chunks with provenance metadata
+Analysis agent(s) – reasons over retrieved chunks (contract clause comparison, risk flagging, summarization) — this is the one most exposed to injected content
+Tool-executing agent(s) – narrowly scoped, each with access to exactly one tool category (e.g., citation lookup, redlining, e-signature status check)
+Validator/critic agent – checks outputs against source chunks before anything reaches the user or a downstream tool call
+
+The key design principle: agents that touch untrusted document content should never have tool-calling or write privileges. The analysis agent that reads a contract should not also be the agent with permission to send emails, modify records, or call external APIs. That separation alone kills most of the impact of successful injection.
+
+2. Prompt injection defense — multiple layers, not one filter
+
+Think of it as defense in depth, each layer catching what the previous one misses:
+
+Layer 1 — Ingestion-time scanning
+Scan documents at upload/index time for injection patterns (instruction-like text, role-play markers, "ignore previous instructions," suspicious formatting like invisible Unicode, HTML comments, hidden white text). Flag and quarantine rather than silently strip — legal docs need audit trails, and silent stripping can look like tampering later.
+
+Layer 2 — Structural isolation of untrusted content
+Always wrap retrieved chunks in clearly delimited, immutable blocks (XML tags or similar) in the prompt, with an explicit system-level instruction that content inside those tags is data to analyze, never instructions to follow. This is the single highest-leverage mitigation and costs almost nothing.
+
+Layer 3 — A dedicated injection-detection model/classifier
+Run a lightweight classifier (or a cheap LLM call) on retrieved chunks before they reach the analysis agent, specifically trained/prompted to detect injection attempts rather than to do the task. Treat this as a separate concern from the main model's judgment — it should not share context with the task-performing call.
+
+Layer 4 — Output-side validation
+After the analysis agent responds, check: does the output request a tool call that wasn't warranted by the user's actual query? Does it contain instructions that look like they leaked from document content (e.g., the model suddenly "agreeing" to waive a clause or take an action nobody asked for)? This is where the validator/critic agent earns its keep — comparing the agent's stated action against the original user intent.
+
+Layer 5 — Privilege boundaries as a backstop
+Assume layers 1–4 will eventually fail. This is why tool access must be structurally separated (see below) — injection succeeding against the analysis agent should still fail to cause harm because that agent has no tools to abuse.
+
+3. Tool access — strict least privilege
+Each tool-executing agent gets a scoped allowlist of exactly the tools it needs, nothing more
+Tool calls that touch anything external (send, delete, modify, submit) require a second confirmation step — either human-in-the-loop or a separate validator agent approval, never a single agent's own say-so
+Log every tool call with the triggering retrieval chunk's provenance, so if something malicious slips through you can trace it back to the source document
+Rate-limit and sandbox tool execution per session so a single compromised turn can't fan out into many actions
+4. Orchestration & validation
+Orchestrator passes structured intermediate results between agents, not raw context — this limits how far injected instructions can travel
+Use a schema/contract between agents (e.g., retrieval agent must return {chunk_id, source_doc, text, confidence}, not free text) so injected instructions have less room to hide in unexpected fields
+Validator agent re-checks every claim in the final answer against cited source chunks (citation grounding) — critical for legal use where hallucinated clauses are a real liability, not just an inconvenience
+Full audit logging at every hop: who asked what, which documents were retrieved, what the analysis agent concluded, what (if any) tool calls were proposed and approved
+5. Legal-specific considerations
+Access control at retrieval time, not just at the UI layer — matter/client confidentiality (ethical walls) needs to be enforced in the vector store query itself, filtered by user permissions before chunks are even retrieved
+Privilege and confidentiality tagging on documents, propagated through chunks, checked before any chunk crosses agent boundaries
+Immutable audit trail — legal/compliance will want to reconstruct exactly what the system saw and said, so log raw retrievals, not just final outputs
+Prefer human sign-off for any agent output that could constitute legal advice or modify a binding document, rather than automating end to end.
+
+

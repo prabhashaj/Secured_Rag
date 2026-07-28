@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LexiSafe — Human Approval Gate</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body style="background-color: var(--bg-base); padding: 2rem;">
+    <div style="max-width: 900px; margin: 0 auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem;">
+            <div>
+                <h1 style="font-size: 1.1rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Human Approval Gate</h1>
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Pending execution requests requiring compliance sign-off</p>
+            </div>
+            <span class="badge badge-warning">{{ approvals|length }} PENDING</span>
+        </div>
+
+        {% if not approvals %}
+        <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+            <p style="color: var(--text-muted); font-size: 0.85rem;">No pending tool execution requests in queue.</p>
+        </div>
+        {% endif %}
+
+        {% for item in approvals %}
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title" style="color: #60a5fa;">Tool Action: {{ item.tool_name }}</div>
+                <span class="badge badge-warning">PENDING APPROVAL</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; color: var(--text-secondary);">
+                <div>Approval ID: <span class="mono">{{ item.approval_id[:12] }}...</span></div>
+                <div>Trace ID: <span class="mono">{{ item.trace_id[:12] }}...</span></div>
+                <div>Requested By: <code>{{ item.requested_by }}</code></div>
+                <div>Validated By: <code>{{ item.validated_by }}</code></div>
+            </div>
+
+            <div class="form-label">Parameters</div>
+            <pre style="background-color: var(--bg-input); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); margin-bottom: 1rem; overflow-x: auto;">{{ item.parameters }}</pre>
+
+            {% if item.chunk_ids_parsed %}
+            <div class="form-label">Originating Chunks</div>
+            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                {% for cid in item.chunk_ids_parsed %}
+                <span class="claim-tag">{{ cid }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; pt: 0.75rem; border-top: 1px solid var(--border-subtle);">
+                <form method="POST" action="/approvals/{{ item.approval_id }}/approve">
+                    <input type="hidden" name="approver" value="compliance_officer">
+                    <button type="submit" class="btn btn-primary btn-sm">Authorize Execution</button>
+                </form>
+                <form method="POST" action="/approvals/{{ item.approval_id }}/reject">
+                    <input type="hidden" name="approver" value="compliance_officer">
+                    <input type="hidden" name="reason" value="Rejected by compliance officer">
+                    <button type="submit" class="btn btn-secondary btn-sm" style="color: var(--status-danger);">Reject Request</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>

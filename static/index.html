@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LexiSafe — Multi-Agent Legal Document RAG</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <a class="brand-logo" href="#">
+                    <div class="brand-mark">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="brand-text">LEXISAFE</div>
+                        <div class="brand-sub">LEGAL RAG PIPELINE</div>
+                    </div>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-category">Core Pipeline</div>
+                <a class="nav-link active" data-target="query-panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    Query Assistant
+                </a>
+                <a class="nav-link" data-target="ingest-panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
+                    Document Ingestion
+                </a>
+
+                <div class="nav-category">Governance & Compliance</div>
+                <a class="nav-link" data-target="approvals-panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    Human Approval Gate
+                </a>
+                <a class="nav-link" data-target="audit-panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                    Audit Logs & Traces
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-indicator-dot"></div>
+                <span>Trust Boundaries Active</span>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="top-bar-title" id="page-heading">Query Assistant</div>
+                <div>
+                    <button class="btn btn-secondary btn-sm" id="btn-refresh-status">
+                        Refresh Health
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-body">
+
+                <!-- PANEL 1: QUERY ASSISTANT -->
+                <section class="panel active" id="query-panel">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Legal Analysis Query</div>
+                            <span class="badge badge-success">ACL Query Enforcement</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Query Text</label>
+                            <textarea id="query-input" class="form-control" placeholder="Enter legal question or clause analysis query (e.g. What are the indemnification terms in Section 4?)..."></textarea>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group">
+                                <label class="form-label">User Identity</label>
+                                <input type="text" id="user-id-input" class="form-control" value="lawyer_alice">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Permitted Matter Scopes (ACL)</label>
+                                <input type="text" id="permitted-matters-input" class="form-control" value="matter-001, matter-002">
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button class="btn btn-primary" id="btn-run-query">Run Pipeline Analysis</button>
+                        </div>
+                    </div>
+
+                    <!-- Pipeline Progress Tracker -->
+                    <div class="pipeline-steps" id="pipeline-tracker" style="display: none;">
+                        <div class="step-item" data-stage="received"><div class="step-num">1</div> Received</div>
+                        <div class="step-divider"></div>
+                        <div class="step-item" data-stage="retrieving"><div class="step-num">2</div> ACL Retrieval</div>
+                        <div class="step-divider"></div>
+                        <div class="step-item" data-stage="classifying"><div class="step-num">3</div> Injection Classifier</div>
+                        <div class="step-divider"></div>
+                        <div class="step-item" data-stage="analyzing"><div class="step-num">4</div> Analysis Agent</div>
+                        <div class="step-divider"></div>
+                        <div class="step-item" data-stage="validating"><div class="step-num">5</div> Grounding Check</div>
+                        <div class="step-divider"></div>
+                        <div class="step-item" data-stage="complete"><div class="step-num">6</div> Complete</div>
+                    </div>
+
+                    <div id="query-result-container"></div>
+                </section>
+
+                <!-- PANEL 2: DOCUMENT INGESTION -->
+                <section class="panel" id="ingest-panel">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Document Ingestion & Indexing</div>
+                            <span class="badge badge-warning">Ingestion Injection Scan Active</span>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1.25rem;">
+                            <label class="form-label">Sample Templates</label>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn btn-secondary btn-sm" id="btn-load-clean">Clean Contract</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-load-injected">Prompt Injection Test Document</button>
+                                <button class="btn btn-secondary btn-sm" id="btn-load-privileged">Privileged Court Motion</button>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                            <div class="form-group">
+                                <label class="form-label">Document Title</label>
+                                <input type="text" id="ingest-title" class="form-control" placeholder="Contract Title">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Matter ID (Scope)</label>
+                                <input type="text" id="ingest-matter" class="form-control" value="matter-001">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Confidentiality Tag</label>
+                                <select id="ingest-confidentiality" class="form-control">
+                                    <option value="public">Public</option>
+                                    <option value="confidential" selected>Confidential</option>
+                                    <option value="privileged">Attorney-Client Privileged</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Raw Text Content</label>
+                            <textarea id="ingest-content" class="form-control" style="min-height: 180px;" placeholder="Paste raw contract or legal text content..."></textarea>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button class="btn btn-primary" id="btn-ingest">Ingest & Index Document</button>
+                        </div>
+                    </div>
+                    <div id="ingest-result-container"></div>
+                </section>
+
+                <!-- PANEL 3: HUMAN APPROVAL GATE -->
+                <section class="panel" id="approvals-panel">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Pending Human Approvals</div>
+                            <button class="btn btn-secondary btn-sm" id="btn-refresh-approvals">Refresh Queue</button>
+                        </div>
+                        <div id="approvals-list-container">
+                            <p class="text-muted" style="font-size: 0.85rem;">Loading queue...</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- PANEL 4: AUDIT LOGS & TRACES -->
+                <section class="panel" id="audit-panel">
+                    <div style="display: grid; grid-template-columns: 320px 1fr; gap: 1.25rem;">
+                        <div class="card">
+                            <div class="card-header">
+                                <div class="card-title">Trace Log Index</div>
+                            </div>
+                            <div id="traces-list-container">
+                                <p class="text-muted" style="font-size: 0.8rem;">No traces logged.</p>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <div class="card-title" id="trace-detail-title">Trace Details</div>
+                            </div>
+                            <div id="trace-timeline-container">
+                                <p class="text-muted" style="font-size: 0.85rem;">Select a trace ID from the index to reconstruct the complete inter-agent message trajectory.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

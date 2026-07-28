@@ -1,0 +1,298 @@
+"""
+Legal RAG — FastAPI application entry point.
+
+Wires together all agents, the orchestrator pipeline, audit logging,
+and the approval gate into a single API.
+"""
+
+from __future__ import annotations
+
+import uuid
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from config import settings
+from orchestrator.pipeline import Pipeline, PipelineContext, PipelineState
+from agents.retrieval_agent import RetrievalAgent
+from agents.injection_classifier import InjectionClassifier
+from agents.analysis_agent import AnalysisAgent
+from agents.validator_agent import ValidatorAgent
+from agents.tool_exec_agent import ToolExecAgent
+from vectorstore.store import VectorStore
+from vectorstore.ingest import ingest_document
+from audit.store import AuditStore
+from audit.trace import TraceReconstructor
+from approval.queue import ApprovalQueue
+from approval.routes import router as approval_router, init_routes
+
+# Import tools to register them
+import tools.citation_lookup
+import tools.document_export
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# --- Global instances ---
+vector_store: VectorStore | None = None
+audit_store: AuditStore | None = None
+approval_queue: ApprovalQueue | None = None
+pipeline: Pipeline | None = None
+trace_reconstructor: TraceReconstructor | None = None
+
+# In-memory store for active pipeline contexts (keyed by trace_id)
+active_pipelines: dict[str, PipelineContext] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize all components on startup."""
+    global vector_store, audit_store, approval_queue, pipeline, trace_reconstructor
+
+    logger.info("Initializing Legal RAG system...")
+
+    # Initialize stores
+    vector_store = VectorStore()
+    audit_store = AuditStore(db_path=settings.sqlite_db_path)
+    approval_queue = ApprovalQueue(db_path=settings.sqlite_db_path)
+
+    # Initialize agents
+    retrieval_agent = RetrievalAgent(vector_store=vector_store)
+    injection_classifier = InjectionClassifier(use_llm=bool(settings.mistral_api_key))
+    analysis_agent = AnalysisAgent()
+    validator_agent = ValidatorAgent()
+
+    # Tool-exec agent with explicit allowlist
+    tool_exec_agent = ToolExecAgent(
+        allowed_tools=["citation_lookup", "document_export"]
+    )
+    tool_exec_agent.register_tool(
+        "citation_lookup",
+        tools.citation_lookup.citation_lookup,
+    )
+    tool_exec_agent.register_tool(
+        "document_export",
+        tools.document_export.document_export,
+    )
+
+    # Wire the pipeline
+    pipeline = Pipeline(
+        retrieval_agent=retrieval_agent,
+        injection_classifier=injection_classifier,
+        analysis_agent=analysis_agent,
+        validator_agent=validator_agent,
+        tool_exec_agent=tool_exec_agent,
+        approval_gate=approval_queue,
+        audit_logger=audit_store,
+    )
+
+    trace_reconstructor = TraceReconstructor(audit_store)
+
+    # Initialize approval routes
+    init_routes(approval_queue)
+
+    logger.info("Legal RAG system initialized successfully")
+    yield
+    logger.info("Shutting down Legal RAG system")
+
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse
+
+app = FastAPI(
+    title="Secure Legal RAG",
+    description="Multi-agent RAG with structural trust boundaries for legal documents",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+import os
+
+# Mount React UI build assets if available, fallback to static
+if os.path.exists("ui/dist"):
+    app.mount("/assets", StaticFiles(directory="ui/dist/assets"), name="assets")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(approval_router)
+
+
+@app.get("/", response_class=FileResponse)
+async def serve_index():
+    """Serve main web application interface."""
+    if os.path.exists("ui/dist/index.html"):
+        return FileResponse("ui/dist/index.html")
+    return FileResponse("static/index.html")
+
+
+
+# --- Request/Response Models ---
+
+class QueryRequest(BaseModel):
+    """User query request."""
+    query: str = Field(description="The legal question to answer")
+    user_id: str = Field(default="default_user", description="User identifier")
+    permitted_matters: list[str] = Field(
+        default_factory=list,
+        description="Matter IDs this user can access",
+    )
+
+
+class QueryResponse(BaseModel):
+    """Query result response."""
+    trace_id: str
+    status: str
+    answer: str | None = None
+    claims: list[dict] | None = None
+    error: str | None = None
+
+
+class IngestRequest(BaseModel):
+    """Document ingestion request."""
+    title: str
+    matter_id: str
+    confidentiality_tag: str = "public"
+    content: str
+
+
+# --- API Endpoints ---
+
+@app.post("/query", response_model=QueryResponse)
+async def submit_query(request: QueryRequest):
+    """Submit a user query — starts the full pipeline."""
+    if not pipeline:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    logger.info(f"New query from {request.user_id}: {request.query[:100]}...")
+
+    ctx = await pipeline.run(
+        user_query=request.query,
+        user_id=request.user_id,
+        user_permitted_matters=request.permitted_matters,
+    )
+
+    # Store context for status lookups
+    active_pipelines[ctx.trace_id] = ctx
+
+    # Build response
+    answer = None
+    claims = None
+
+    if ctx.analysis_result and ctx.state == PipelineState.COMPLETE:
+        answer = ctx.analysis_result.answer_draft
+        claims = [c.model_dump() for c in ctx.analysis_result.claims]
+
+    return QueryResponse(
+        trace_id=ctx.trace_id,
+        status=ctx.state.value,
+        answer=answer,
+        claims=claims,
+        error=ctx.error,
+    )
+
+
+@app.get("/query/{trace_id}/status")
+async def query_status(trace_id: str):
+    """Check pipeline status for a query."""
+    ctx = active_pipelines.get(trace_id)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    return {
+        "trace_id": trace_id,
+        "status": ctx.state.value,
+        "error": ctx.error,
+        "has_result": ctx.analysis_result is not None,
+        "has_tool_action": ctx.tool_action_request is not None,
+    }
+
+
+@app.get("/query/{trace_id}/result")
+async def query_result(trace_id: str):
+    """Get the final result for a query."""
+    ctx = active_pipelines.get(trace_id)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    result = {
+        "trace_id": trace_id,
+        "status": ctx.state.value,
+        "error": ctx.error,
+    }
+
+    if ctx.analysis_result:
+        result["answer"] = ctx.analysis_result.answer_draft
+        result["claims"] = [c.model_dump() for c in ctx.analysis_result.claims]
+
+    if ctx.validation_verdict:
+        result["validation"] = ctx.validation_verdict.model_dump()
+
+    if ctx.tool_action_result:
+        result["tool_result"] = ctx.tool_action_result.model_dump()
+
+    if ctx.scan_results:
+        result["injection_scans"] = [s.model_dump() for s in ctx.scan_results]
+
+    return result
+
+
+@app.get("/audit/trace/{trace_id}")
+async def get_audit_trace(trace_id: str):
+    """Reconstruct the full audit trace for a pipeline run."""
+    if not trace_reconstructor:
+        raise HTTPException(status_code=503, detail="Audit system not initialized")
+
+    trace = trace_reconstructor.reconstruct(trace_id)
+    if trace["status"] == "not_found":
+        raise HTTPException(status_code=404, detail="Trace not found")
+
+    return trace
+
+
+@app.get("/audit/traces")
+async def list_traces():
+    """List all audit traces."""
+    if not audit_store:
+        raise HTTPException(status_code=503, detail="Audit system not initialized")
+    return audit_store.get_all_traces()
+
+
+@app.post("/ingest")
+async def ingest_doc(request: IngestRequest):
+    """Ingest a document into the vector store."""
+    if not vector_store:
+        raise HTTPException(status_code=503, detail="System not initialized")
+
+    doc_id = f"doc_{uuid.uuid4().hex[:8]}"
+
+    try:
+        result = await ingest_document(
+            text=request.content,
+            source_doc_id=doc_id,
+            source_doc_title=request.title,
+            matter_id=request.matter_id,
+            confidentiality_tag=request.confidentiality_tag,
+            vector_store=vector_store,
+        )
+        return {
+            "status": "success",
+            "doc_id": doc_id,
+            **result,
+        }
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/health")
+async def health():
+    """Health check."""
+    return {
+        "status": "healthy",
+        "vector_store_count": vector_store.count() if vector_store else 0,
+        "audit_log_count": audit_store.count() if audit_store else 0,
+    }

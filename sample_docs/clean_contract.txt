@@ -1,0 +1,46 @@
+CONSULTING SERVICES AGREEMENT
+
+This Consulting Services Agreement ("Agreement") is entered into as of January 15, 2026, by and between TechCorp Inc., a Delaware corporation ("Client"), and LegalAdvisors LLC, a New York limited liability company ("Consultant").
+
+SECTION 1: SCOPE OF SERVICES
+
+The Consultant shall provide the following services to the Client:
+(a) Legal review and analysis of technology licensing agreements
+(b) Regulatory compliance advisory for data protection requirements
+(c) Contract negotiation support for enterprise software agreements
+
+SECTION 2: COMPENSATION
+
+2.1 Fee Structure. The Client shall pay the Consultant a monthly retainer of $25,000 for the services described in Section 1.
+
+2.2 Expense Reimbursement. The Client shall reimburse the Consultant for all reasonable out-of-pocket expenses incurred in connection with the performance of the Services, provided such expenses are pre-approved in writing.
+
+SECTION 3: TERM AND TERMINATION
+
+3.1 Term. This Agreement shall commence on January 15, 2026, and shall continue for a period of twelve (12) months unless earlier terminated.
+
+3.2 Termination for Convenience. Either party may terminate this Agreement upon thirty (30) days' prior written notice to the other party.
+
+3.3 Termination for Cause. Either party may terminate this Agreement immediately upon written notice if the other party materially breaches this Agreement and fails to cure such breach within fifteen (15) days of receiving notice.
+
+SECTION 4: INDEMNIFICATION
+
+4.1 Consultant Indemnification. The Consultant shall indemnify, defend, and hold harmless the Client from and against any claims, damages, losses, or expenses arising out of the Consultant's negligence or willful misconduct in the performance of the Services.
+
+4.2 Client Indemnification. The Client shall indemnify, defend, and hold harmless the Consultant from and against any claims, damages, losses, or expenses arising out of the Client's negligence or willful misconduct.
+
+4.3 Indemnification Cap. The total aggregate liability of either party under this Section 4 shall not exceed the total fees paid under this Agreement during the twelve (12) months preceding the claim.
+
+SECTION 5: CONFIDENTIALITY
+
+5.1 Confidential Information. Each party acknowledges that it may receive confidential information from the other party. Each party agrees to maintain the confidentiality of such information and not to disclose it to any third party without the prior written consent of the disclosing party.
+
+5.2 Exceptions. The obligations set forth in Section 5.1 shall not apply to information that: (a) is or becomes publicly available through no fault of the receiving party; (b) was known to the receiving party prior to disclosure; (c) is independently developed by the receiving party; or (d) is required to be disclosed by law or court order.
+
+SECTION 6: GOVERNING LAW
+
+This Agreement shall be governed by and construed in accordance with the laws of the State of New York, without regard to its conflict of laws principles.
+
+SECTION 7: DISPUTE RESOLUTION
+
+Any disputes arising under this Agreement shall be resolved through binding arbitration in New York City, administered by the American Arbitration Association under its Commercial Arbitration Rules.

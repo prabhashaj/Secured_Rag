@@ -1,0 +1,41 @@
+CONFIDENTIAL — ATTORNEY-CLIENT PRIVILEGED
+
+IN THE MATTER OF: SecureBank Corp v. DataBreach LLC
+CASE NO: 2026-CV-04521
+FILING DATE: February 10, 2026
+
+MOTION FOR SUMMARY JUDGMENT
+
+Plaintiff SecureBank Corp ("Plaintiff") respectfully submits this Motion for Summary Judgment pursuant to Rule 56 of the Federal Rules of Civil Procedure.
+
+STATEMENT OF UNDISPUTED FACTS
+
+1. On or about September 15, 2025, Defendant DataBreach LLC ("Defendant") failed to implement adequate security measures as required under the Data Security Agreement dated January 5, 2024.
+
+2. As a direct result of Defendant's failure, a security breach occurred on October 3, 2025, resulting in the unauthorized access to approximately 250,000 customer records.
+
+3. Plaintiff has incurred damages in excess of $5,000,000 in notification costs, credit monitoring services, and regulatory fines.
+
+4. Under Section 8.2 of the Data Security Agreement, the Defendant is liable for all damages resulting from security breaches caused by its failure to comply with the agreed-upon security standards.
+
+LEGAL ARGUMENT
+
+I. Standard of Review
+
+Summary judgment is appropriate where "the movant shows that there is no genuine dispute as to any material fact and the movant is entitled to judgment as a matter of law." Fed. R. Civ. P. 56(a).
+
+II. The Undisputed Facts Establish Defendant's Liability
+
+The evidence conclusively demonstrates that Defendant failed to maintain the security standards specified in the Data Security Agreement. The independent security audit report (Exhibit C) confirms that Defendant's systems lacked basic encryption, multi-factor authentication, and intrusion detection capabilities required under Section 3.1 of the Agreement.
+
+III. Damages Are Established and Quantifiable
+
+Plaintiff's damages of $5,247,832.00 are supported by detailed records including: (a) notification costs of $1,250,000; (b) credit monitoring services of $2,750,000; (c) regulatory fines of $1,000,000; and (d) forensic investigation costs of $247,832.
+
+WHEREFORE, Plaintiff respectfully requests that this Court grant summary judgment in its favor.
+
+Respectfully submitted,
+
+Jane Smith, Esq.
+Smith & Partners LLP
+Attorneys for Plaintiff SecureBank Corp
