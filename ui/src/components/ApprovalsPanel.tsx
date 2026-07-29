@@ -1,22 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, RefreshCw, Clock, CheckCircle2, XCircle, Terminal, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Clock, CheckCircle2, XCircle, Terminal, AlertTriangle, AlertCircle } from 'lucide-react';
 import type { ApprovalRequest } from '../types';
+import { apiFetch } from '../lib/api';
 
 export const ApprovalsPanel: React.FC = () => {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   const fetchApprovals = async () => {
     setIsLoading(true);
+    setErrorMessage(null);
     try {
-      const res = await fetch('/approvals/api/pending');
+      const res = await apiFetch('/approvals/api/pending');
       if (res.ok) {
         const data = await res.json();
         setApprovals(data || []);
+      } else {
+        setErrorMessage(`Couldn't load pending approvals (HTTP ${res.status}). Try refreshing.`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Fetch approvals error', e);
+      setErrorMessage(e.message || "Couldn't load pending approvals — try refreshing.");
     } finally {
       setIsLoading(false);
     }
@@ -31,7 +37,7 @@ export const ApprovalsPanel: React.FC = () => {
   const handleApprove = async (approvalId: string) => {
     setProcessingId(approvalId);
     try {
-      const res = await fetch(`/approvals/api/${approvalId}/approve`, {
+      const res = await apiFetch(`/approvals/api/${approvalId}/approve`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -47,7 +53,7 @@ export const ApprovalsPanel: React.FC = () => {
   const handleReject = async (approvalId: string) => {
     setProcessingId(approvalId);
     try {
-      const res = await fetch(`/approvals/api/${approvalId}/reject`, {
+      const res = await apiFetch(`/approvals/api/${approvalId}/reject`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -62,6 +68,22 @@ export const ApprovalsPanel: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Error Banner */}
+      {errorMessage && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-between text-xs text-red-800">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={fetchApprovals}
+            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="bg-white border border-slate-200/80 rounded-2xl p-7 shadow-soft-md">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -71,7 +93,7 @@ export const ApprovalsPanel: React.FC = () => {
           <button
             onClick={fetchApprovals}
             disabled={isLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-all shadow-soft-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-all shadow-soft-sm border border-slate-200"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh Queue</span>
@@ -85,9 +107,9 @@ export const ApprovalsPanel: React.FC = () => {
         {approvals.length === 0 ? (
           <div className="p-10 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
             <Clock className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-            <div className="text-sm font-bold text-slate-800 mb-1">Approval Queue Active & Empty</div>
-            <div className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-              When a query results in a proposed action (e.g. legal_web_search, document_export), it will be queued here for manual verification.
+            <div className="text-sm font-bold text-slate-800 mb-1">No actions currently awaiting approval</div>
+            <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+              This queue is used for tool actions with external or binding effects (e.g. filing submissions, signed documents) if/when those are added.
             </div>
           </div>
         ) : (
@@ -104,9 +126,9 @@ export const ApprovalsPanel: React.FC = () => {
                     </div>
                     <div>
                       <div className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                        <span>{req.tool_name}</span>
+                        <span>Tool Action: {req.tool_name}</span>
                         <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-bold uppercase rounded-md">
-                          Pending Approval
+                          Awaiting Sign-off
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 font-mono">
@@ -122,7 +144,7 @@ export const ApprovalsPanel: React.FC = () => {
                 <div className="bg-white p-4 rounded-xl border border-slate-200/70 space-y-2">
                   <div className="text-xs font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                     <Terminal className="w-3.5 h-3.5 text-slate-400" />
-                    Target Parameters / Search Query
+                    Proposed Action Parameters & Justification
                   </div>
                   <pre className="text-xs font-mono text-slate-800 bg-slate-50 p-2.5 rounded-lg overflow-x-auto">
                     {JSON.stringify(req.parameters_parsed || req.parameters, null, 2)}

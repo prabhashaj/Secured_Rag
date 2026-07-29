@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, FileText, CheckCircle2, AlertTriangle, Lock } from 'lucide-react';
 import type { QueryResponse, PipelineState } from '../types';
+import { apiFetch } from '../lib/api';
 
 export const QueryPanel: React.FC = () => {
   const [query, setQuery] = useState('');
@@ -34,7 +35,7 @@ export const QueryPanel: React.FC = () => {
         .map(m => m.trim())
         .filter(Boolean);
 
-      const res = await fetch('/query', {
+      const res = await apiFetch('/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -51,7 +52,7 @@ export const QueryPanel: React.FC = () => {
       setCurrentStage(data.status);
 
       try {
-        const traceRes = await fetch(`/audit/trace/${data.trace_id}`);
+        const traceRes = await apiFetch(`/audit/trace/${data.trace_id}`);
         if (traceRes.ok) {
           const tData = await traceRes.json();
           setTraceData(tData);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Upload, CheckCircle, AlertTriangle } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 export const IngestPanel: React.FC = () => {
   const [title, setTitle] = useState('');
@@ -62,7 +63,7 @@ Undisputed facts establish Defendant's security breach resulted in $5,247,832.00
     setIngestResult(null);
 
     try {
-      const res = await fetch('/ingest', {
+      const res = await apiFetch('/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

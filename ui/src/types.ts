@@ -56,6 +56,8 @@ export interface TraceSummary {
   ended_at: string;
   message_count: number;
   message_types: string;
+  execution_path?: string;
+  security_verdict?: string;
 }
 
 export interface ApprovalRequest {

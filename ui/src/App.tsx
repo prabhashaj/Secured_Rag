@@ -10,6 +10,7 @@ import { AuditPanel } from './components/AuditPanel';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/AuthModal';
 import { UserProfileDrawer } from './components/UserProfileDrawer';
+import { apiFetch } from './lib/api';
 import type { ChatSession } from './types';
 
 const AppContent: React.FC = () => {
@@ -23,9 +24,17 @@ const AppContent: React.FC = () => {
 
   const { user } = useAuth();
 
+  useEffect(() => {
+    const handleExpired = () => {
+      setIsAuthOpen(true);
+    };
+    window.addEventListener('auth_session_expired', handleExpired);
+    return () => window.removeEventListener('auth_session_expired', handleExpired);
+  }, []);
+
   const fetchSessions = async () => {
     try {
-      const res = await fetch('/sessions');
+      const res = await apiFetch('/sessions');
       if (res.ok) {
         const data: ChatSession[] = await res.json();
         setSessions(data);
@@ -44,7 +53,7 @@ const AppContent: React.FC = () => {
 
   const handleCreateSession = async () => {
     try {
-      const res = await fetch('/sessions', {
+      const res = await apiFetch('/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -67,7 +76,7 @@ const AppContent: React.FC = () => {
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const res = await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
       if (res.ok) {
         const filtered = sessions.filter((s) => s.session_id !== sessionId);
         setSessions(filtered);
@@ -88,7 +97,7 @@ const AppContent: React.FC = () => {
 
   const fetchPendingCount = async () => {
     try {
-      const res = await fetch('/approvals/api/pending');
+      const res = await apiFetch('/approvals/api/pending');
       if (res.ok) {
         const data = await res.json();
         setPendingApprovalsCount((data || []).length);

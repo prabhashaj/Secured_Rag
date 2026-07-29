@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import type { ChatSession, ChatMessage, Claim } from '../types';
+import { apiFetch } from '../lib/api';
 
 interface ConversationalChatProps {
   activeSessionId: string | null;
@@ -224,19 +225,9 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const getAuthHeaders = (): Record<string, string> => {
-    const token = localStorage.getItem('lexicon_auth_token');
-    return {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
-  };
-
   const fetchMessages = async (sessionId: string) => {
     try {
-      const res = await fetch(`/sessions/${sessionId}/messages`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetch(`/sessions/${sessionId}/messages`);
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -262,9 +253,7 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     try {
       let targetTraceId = traceId;
       if (!targetTraceId) {
-        const pendingRes = await fetch('/approvals/api/pending', {
-          headers: getAuthHeaders(),
-        });
+        const pendingRes = await apiFetch('/approvals/api/pending');
         if (pendingRes.ok) {
           const items = await pendingRes.json();
           if (items.length > 0) {
@@ -279,9 +268,8 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
       }
 
       setExecutingTraceId(targetTraceId);
-      const res = await fetch(`/approvals/api/trace/${targetTraceId}/approve`, {
+      const res = await apiFetch(`/approvals/api/trace/${targetTraceId}/approve`, {
         method: 'POST',
-        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -325,16 +313,13 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
   const handleInlineReject = async (traceId: string) => {
     setExecutingTraceId(traceId);
     try {
-      const pendingRes = await fetch('/approvals/api/pending', {
-        headers: getAuthHeaders(),
-      });
+      const pendingRes = await apiFetch('/approvals/api/pending');
       if (pendingRes.ok) {
         const pendingItems = await pendingRes.json();
         const match = pendingItems.find((item: any) => item.trace_id === traceId);
         if (match) {
-          const appRes = await fetch(`/approvals/api/${match.approval_id}/reject`, {
+          const appRes = await apiFetch(`/approvals/api/${match.approval_id}/reject`, {
             method: 'POST',
-            headers: getAuthHeaders(),
           });
           if (appRes.ok && activeSessionId) {
             await fetchMessages(activeSessionId);
@@ -354,9 +339,9 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
 
     let targetSessionId = activeSessionId;
     if (!targetSessionId) {
-      const res = await fetch('/sessions', {
+      const res = await apiFetch('/sessions', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: query.slice(0, 30) + '...',
           user_id: 'default_user',
@@ -385,9 +370,9 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     setIsSubmitting(true);
 
     try {
-      const res = await fetch('/query', {
+      const res = await apiFetch('/query', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: userText,
           user_id: 'default_user',
@@ -415,7 +400,7 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
           ]);
         }
       } else {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({ detail: 'Request failed' }));
         setMessages((prev) => [
           ...prev,
           {

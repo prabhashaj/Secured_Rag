@@ -13,6 +13,8 @@ import {
   Briefcase
 } from 'lucide-react';
 
+import { apiFetch } from '../lib/api';
+
 interface DocumentItem {
   source_doc_id: string;
   source_doc_title: string;
@@ -35,17 +37,22 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({
   const [selectedMatter, setSelectedMatter] = useState<string>('all');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fetchDocuments = async () => {
     setIsLoading(true);
+    setErrorMessage(null);
     try {
-      const res = await fetch('/documents');
+      const res = await apiFetch('/documents');
       if (res.ok) {
         const data: DocumentItem[] = await res.json();
         setDocuments(data);
+      } else {
+        setErrorMessage(`Couldn't load documents (HTTP ${res.status}). Try refreshing.`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch documents', e);
+      setErrorMessage(e.message || "Couldn't load documents — try refreshing.");
     } finally {
       setIsLoading(false);
     }
@@ -60,7 +67,7 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({
     if (!window.confirm(`Are you sure you want to delete document '${docId}'?`)) return;
 
     try {
-      const res = await fetch(`/documents/${docId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/documents/${docId}`, { method: 'DELETE' });
       if (res.ok) {
         setDocuments((prev) => prev.filter((d) => d.source_doc_id !== docId));
       }
@@ -90,6 +97,22 @@ export const DocumentsPanel: React.FC<DocumentsPanelProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Error Banner */}
+      {errorMessage && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center justify-between text-xs text-red-800">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={fetchDocuments}
+            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-soft-sm">
         <div>

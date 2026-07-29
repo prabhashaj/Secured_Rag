@@ -4,10 +4,43 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-success-bg: #ecfdf5;
+  --color-success-text: #047857;
+  --color-success-border: #a7f3d0;
+
+  --color-pending-bg: #fffbeb;
+  --color-pending-text: #b45309;
+  --color-pending-border: #fde68a;
+
+  --color-external-bg: #e0e7ff;
+  --color-external-text: #4338ca;
+  --color-external-border: #c7d2fe;
+
+  --color-danger-bg: #fef2f2;
+  --color-danger-text: #b91c1c;
+  --color-danger-border: #fecaca;
+}
+
 @layer base {
   body {
     @apply bg-slate-50 text-slate-900 font-sans antialiased selection:bg-brand-100 selection:text-brand-900;
     font-size: 16px;
+  }
+}
+
+@layer components {
+  .btn-icon {
+    @apply p-2 rounded-xl text-slate-600 hover:bg-slate-100 active:bg-slate-200 transition-all border border-slate-200 shadow-soft-sm flex items-center justify-center;
+  }
+  .badge-success {
+    @apply px-2.5 py-0.5 rounded font-bold text-[10px] uppercase bg-emerald-50 text-emerald-700 border border-emerald-200;
+  }
+  .badge-pending {
+    @apply px-2.5 py-0.5 rounded font-bold text-[10px] uppercase bg-amber-50 text-amber-700 border border-amber-200;
+  }
+  .badge-external {
+    @apply px-2.5 py-0.5 rounded font-bold text-[10px] uppercase bg-indigo-50 text-indigo-700 border border-indigo-200;
   }
 }
 

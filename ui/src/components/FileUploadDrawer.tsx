@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle2, AlertCircle, X, FileCheck } from 'lucide-react';
 
+import { apiFetch } from '../lib/api';
+
 interface FileUploadDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -47,7 +49,7 @@ export const FileUploadDrawer: React.FC<FileUploadDrawerProps> = ({
     if (title) formData.append('title', title);
 
     try {
-      const res = await fetch('/ingest/file', {
+      const res = await apiFetch('/ingest/file', {
         method: 'POST',
         body: formData,
       });
