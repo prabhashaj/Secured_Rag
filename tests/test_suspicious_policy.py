@@ -124,7 +124,7 @@ async def test_policy_pass_through(
         validator_agent=validator_agent,
     )
 
-    ctx = await pipeline.run("test query", "user1", ["m1"])
+    ctx = await pipeline.run("What are the termination notice requirements under Matter 101?", "user1", ["m1"])
 
     assert ctx.state == PipelineState.COMPLETE
     assert len(ctx.clean_chunks) == 2
@@ -155,7 +155,7 @@ async def test_policy_flag_in_answer(
         validator_agent=validator_agent,
     )
 
-    ctx = await pipeline.run("test query", "user1", ["m1"])
+    ctx = await pipeline.run("What are the termination notice requirements under Matter 101?", "user1", ["m1"])
 
     assert ctx.state == PipelineState.COMPLETE
     assert len(ctx.clean_chunks) == 2
@@ -190,7 +190,7 @@ async def test_policy_quarantine(
         validator_agent=validator_agent,
     )
 
-    ctx = await pipeline.run("test query", "user1", ["m1"])
+    ctx = await pipeline.run("What are the termination notice requirements under Matter 101?", "user1", ["m1"])
 
     assert ctx.state == PipelineState.COMPLETE
     assert len(ctx.clean_chunks) == 1

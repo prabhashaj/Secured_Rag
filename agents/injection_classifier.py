@@ -42,12 +42,29 @@ SIGNAL_TYPE_MAP = {
 VALID_SIGNAL_NAMES = {s.value for s in InjectionSignal}
 
 
+import re
+
+UNICODE_PATTERNS = [
+    r"[\u200b\u200c\u200d\u2060\ufeff]",  # Zero-width chars
+    r"[\u202a-\u202e\u2066-\u2069]",       # Bidi overrides
+]
+
+
+def check_hidden_unicode(text: str) -> bool:
+    """Deterministic pre-filter scan for hidden/invisible/bidi/control unicode codepoints."""
+    for pattern in UNICODE_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    return False
+
+
 class InjectionClassifier:
     """
-    Two-layer injection classifier.
+    Injection classifier with deterministic Unicode pre-filter and LLM semantic scan.
 
-    Layer 1: Fast regex/heuristic scan (no LLM call)
-    Layer 2: Mistral Small LLM scan (for chunks that pass heuristics)
+    1. Deterministic Pre-filter: Unicode codepoint scan (zero-width, bidi overrides).
+       If triggered -> BLOCKED immediately (no LLM call).
+    2. LLM Semantic Scan: Mistral Small LLM scan for semantic instruction/role-play/leak detection.
 
     Each chunk is scanned in ISOLATED CONTEXT — no chat history, no prior turns.
     """
@@ -64,43 +81,31 @@ class InjectionClassifier:
 
     async def scan(self, chunk: Chunk, heuristic_only: bool = False) -> InjectionScanResult:
         """
-        Scan a single chunk for injection attempts.
-        Each scan runs in isolated context — no shared state between chunks.
+        Scan a single chunk for injection attempts in isolated context.
 
-        Args:
-            heuristic_only: If True, skip LLM layer-2 scan when heuristics pass clean.
-                           Suspicious heuristic results still escalate to LLM for confirmation.
-                           Used for user query fast-path to reduce latency.
+        - Deterministic Unicode pre-filter runs first on every chunk unconditionally.
+        - Semantic judgment runs via LLM scan.
         """
-        # Layer 1: Fast heuristic scan
-        heuristic_result = self._heuristic_scan(chunk)
-
-        if heuristic_result.verdict == InjectionVerdict.BLOCKED:
-            logger.warning(
-                f"Chunk {chunk.chunk_id} BLOCKED by heuristic scan: "
-                f"{[s.value for s in heuristic_result.signals]}"
+        # Non-negotiable #6: Deterministic Unicode pre-filter
+        if check_hidden_unicode(chunk.text):
+            logger.warning(f"Chunk {chunk.chunk_id} BLOCKED by deterministic Unicode pre-filter scan.")
+            return InjectionScanResult(
+                chunk_id=chunk.chunk_id,
+                verdict=InjectionVerdict.BLOCKED,
+                signals=[InjectionSignal.HIDDEN_UNICODE],
+                confidence=1.0,
+                action_taken=InjectionAction.QUARANTINED,
             )
-            return heuristic_result
 
-        # Fast path: if heuristic_only and heuristic says clean, skip LLM round-trip
-        if heuristic_only and heuristic_result.verdict == InjectionVerdict.CLEAN:
-            return heuristic_result
-
-        # Layer 2: LLM scan (for chunks that passed or were suspicious)
-        if self.use_llm and heuristic_result.verdict != InjectionVerdict.BLOCKED:
+        # Run LLM scan for semantic injection judgment
+        if self.use_llm and settings.mistral_api_key:
             try:
                 llm_result = await self._llm_scan(chunk)
-                # Merge signals from both layers
-                merged_signals = list(
-                    set(heuristic_result.signals) | set(llm_result.signals)
-                )
-                # Take the more severe verdict
-                final_verdict = self._merge_verdicts(
-                    heuristic_result.verdict, llm_result.verdict
-                )
-                final_confidence = max(
-                    heuristic_result.confidence, llm_result.confidence
-                )
+                heuristic_result = self._heuristic_scan(chunk)
+                
+                merged_signals = list(set(heuristic_result.signals) | set(llm_result.signals))
+                final_verdict = self._merge_verdicts(heuristic_result.verdict, llm_result.verdict)
+                final_confidence = max(heuristic_result.confidence, llm_result.confidence)
                 action = (
                     InjectionAction.QUARANTINED
                     if final_verdict == InjectionVerdict.BLOCKED
@@ -115,16 +120,14 @@ class InjectionClassifier:
                     action_taken=action,
                 )
             except Exception as e:
-                logger.error(
-                    f"LLM scan failed for chunk {chunk.chunk_id}: {e}. "
-                    f"Falling back to heuristic result."
-                )
-                return heuristic_result
+                logger.error(f"LLM scan failed for chunk {chunk.chunk_id}: {e}. Falling back to heuristic scan.")
+                return self._heuristic_scan(chunk)
 
-        return heuristic_result
+        # Fallback to heuristic scan if LLM is disabled or unconfigured (e.g. offline unit test suite)
+        return self._heuristic_scan(chunk)
 
     def _heuristic_scan(self, chunk: Chunk) -> InjectionScanResult:
-        """Layer 1: Fast regex/heuristic scan."""
+        """Fallback regex scan for offline test suites."""
         findings = scan_for_injection_patterns(chunk.text)
 
         if not findings:
@@ -136,21 +139,19 @@ class InjectionClassifier:
                 action_taken=InjectionAction.PASSED_THROUGH,
             )
 
-        # Convert findings to enum signals
         signals = []
         for finding in findings:
             signal_type = finding["signal_type"]
             if signal_type in SIGNAL_TYPE_MAP:
                 signals.append(SIGNAL_TYPE_MAP[signal_type])
 
-        signals = list(set(signals))  # Deduplicate
+        signals = list(set(signals))
 
-        # Determine severity
-        # Multiple signal types or high-confidence patterns → block
         if len(signals) >= 2 or any(
             s in (
                 InjectionSignal.SYSTEM_PROMPT_MARKER,
                 InjectionSignal.XML_ESCAPE_ATTEMPT,
+                InjectionSignal.HIDDEN_UNICODE,
             )
             for s in signals
         ):

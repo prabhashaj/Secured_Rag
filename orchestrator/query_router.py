@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+from config import settings
 from orchestrator.context_builder import build_router_context
 
 logger = logging.getLogger(__name__)
@@ -34,63 +35,61 @@ class RouterDecision:
     reasoning: str
 
 
-# Affirmative messages must always route to direct_llm
+# Affirmative messages must always route to direct_llm per security non-negotiable #3
 AFFIRMATIVE_PATTERN = r"^(yes|yeah|yep|ok|okay|sure|proceed|approve|go\s*ahead|do\s*it|do\s*so)[\.!\?]*$"
 
-# Web search triggers
-WEBSEARCH_PATTERNS = [
-    r"\b(websearch|web\s*search)\b",
-    r"\b(sec\s*filing|sec\s*filings)\b",
-    r"\b(public\s*docket|court\s*docket|docket)\b",
-    r"\b(statute\s*lookup|statutory\s*code|statute|constitution|act|code|laws?\s+of)\b",
-    r"\b(search\s+external|search\s+online|google|legal\s*web|look\s*up|india|indian|foreign\s+law|share\s+the\s+laws)\b",
-    r"\b\d+\s+u\.?s\.?c\.?\b",
-    r"\b(merger\s*guidelines|ftc|doj|regulatory\s*updates?|case\s*law|appellate)\b",
-]
 
-# Direct LLM triggers
-DIRECT_LLM_PATTERNS = [
-    r"^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening)|howdy)\b",
-    r"^what\s+can\s+you\s+(do|assist|help)",
-    r"human[\s-]in[\s-]the[\s-]loop|\bhitl\b|approval\s+queue",
-    r"what\s+(are\s+the\s+)?tools|list\s+(all\s+)?tools|tools\s+we\s+are\s+using",
-    r"\b(cricket|maggi|recipe|cooking|food|football|basketball|weather|movie|jokes?|song|music|game)\b",
-]
-
-
-def route_query(user_query: str) -> RouterDecision:
+async def route_query(
+    user_query: str,
+    conversation_context: list[dict] | None = None,
+    mistral_client=None,
+) -> RouterDecision:
     """
-    Classify user message into an execution path:
-    - PIPELINE: Matter documents in vector RAG
+    Classify user message into an execution path using LLM reasoning with conversation memory:
+    - PIPELINE: Matter documents in vector RAG (default fallback)
     - DIRECT_LLM: Greeting / system inquiry / out-of-domain / affirmative text
     - WEBSEARCH_LLM: External legal research
     """
     query_clean = user_query.strip().lower()
 
-    # CRITICAL SECURITY RULE: Affirmative words on their own route to direct_llm
+    # CRITICAL SECURITY RULE (Non-negotiable #3): Affirmative words on their own route to direct_llm
     if re.match(AFFIRMATIVE_PATTERN, query_clean):
         return RouterDecision(
             path=ExecutionPath.DIRECT_LLM,
             reasoning="Short affirmative message routed to direct_llm per security policy — approval requires explicit endpoint",
         )
 
-    # Fast pattern routing
-    for pattern in WEBSEARCH_PATTERNS:
-        if re.search(pattern, query_clean):
-            return RouterDecision(
-                path=ExecutionPath.WEBSEARCH_LLM,
-                reasoning=f"Matched external legal research pattern '{pattern}'",
+    # Use LLM classifier for intent routing if API key is present
+    if settings.mistral_api_key:
+        try:
+            from mistralai.client import Mistral
+            client = mistral_client or Mistral(api_key=settings.mistral_api_key)
+            model_name = getattr(settings, "mistral_model", getattr(settings, "mistral_small_model", "mistral-small-latest"))
+            messages = build_router_context(user_query, conversation_context)
+            resp = await client.chat.complete_async(
+                model=model_name,
+                messages=messages,
+                response_format={"type": "json_object"},
             )
+            raw = resp.choices[0].message.content.strip()
+            data = json.loads(raw)
+            p_str = data.get("path", "pipeline")
+            reasoning = data.get("reasoning", "LLM router classification")
 
-    for pattern in DIRECT_LLM_PATTERNS:
-        if re.search(pattern, query_clean):
+            try:
+                selected_path = ExecutionPath(p_str)
+            except ValueError:
+                selected_path = ExecutionPath.PIPELINE
+
             return RouterDecision(
-                path=ExecutionPath.DIRECT_LLM,
-                reasoning=f"Matched direct LLM pattern '{pattern}'",
+                path=selected_path,
+                reasoning=reasoning,
             )
+        except Exception as e:
+            logger.warning(f"LLM query router call failed: {e}. Falling back to PIPELINE.")
 
-    # Default to PIPELINE (safest default)
+    # Safest default fallback on failure or missing API key
     return RouterDecision(
         path=ExecutionPath.PIPELINE,
-        reasoning="Legal matter query — routing to Internal Vector RAG Pipeline",
+        reasoning="Legal matter query — routing to Internal Vector RAG Pipeline (default)",
     )

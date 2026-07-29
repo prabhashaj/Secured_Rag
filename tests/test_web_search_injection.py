@@ -6,6 +6,7 @@ InjectionClassifier before reaching the AnalysisAgent, catching prompt injection
 """
 
 import pytest
+import unittest.mock
 from unittest.mock import AsyncMock, MagicMock
 
 from orchestrator.pipeline import Pipeline, PipelineState
@@ -59,20 +60,27 @@ async def test_web_search_injection_blocked_by_classifier():
         trust_level_after_validation="trusted",
     ))
 
+    from schemas.retrieval import RetrievalResult
+    mock_retrieval = MagicMock()
+    mock_retrieval.retrieve = AsyncMock(return_value=RetrievalResult(query="test", chunks=[injected_chunk]))
+
     pipeline = Pipeline(
-        retrieval_agent=MagicMock(),
+        retrieval_agent=mock_retrieval,
         injection_classifier=classifier,
         analysis_agent=mock_analysis,
         validator_agent=mock_validator,
         web_retrieval_agent=mock_web_agent,
     )
 
-    # 3. Execute query on WEBSEARCH_LLM path
-    ctx = await pipeline.run(
-        user_query="Search external statutory code for merger guidelines",
-        user_id="test_lawyer",
-        user_permitted_matters=["Matter_101"],
-    )
+    # Force execution path to websearch_llm for test
+    from orchestrator.query_router import RouterDecision, ExecutionPath
+    with unittest.mock.patch("orchestrator.pipeline.route_query", new_callable=AsyncMock) as mock_route:
+        mock_route.return_value = RouterDecision(path=ExecutionPath.WEBSEARCH_LLM, reasoning="Test web search")
+        ctx = await pipeline.run(
+            user_query="Search external statutory code for merger guidelines",
+            user_id="test_lawyer",
+            user_permitted_matters=["Matter_101"],
+        )
 
     # 4. Assert injection classifier BLOCKED the malicious chunk and pipeline failed safely
     assert ctx.state == PipelineState.FAILED

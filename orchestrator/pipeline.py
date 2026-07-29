@@ -168,7 +168,8 @@ class Pipeline:
         )
 
         # Router decides execution path: PIPELINE, DIRECT_LLM, or WEBSEARCH_LLM
-        decision = route_query(user_query)
+        history = session_memory.get("history", []) if session_memory else []
+        decision = await route_query(user_query, history)
         ctx.execution_path = decision.path.value
         logger.info(
             f"[trace={ctx.trace_id}] Router decision: path={ctx.execution_path}, "
@@ -285,7 +286,7 @@ class Pipeline:
 
         ctx.transition_to(PipelineState.CLASSIFYING)
 
-        # 1. Scan user query — heuristic fast path (skip LLM layer for clean queries)
+        # 1. Scan user query (Unicode pre-filter + LLM classifier)
         query_chunk = Chunk(
             chunk_id="user_query",
             source_doc_id="input_prompt",
@@ -297,9 +298,7 @@ class Pipeline:
             page_ref="p1",
             acl_check_passed=True,
         )
-        # heuristic_only=True: skips LLM round-trip when heuristics pass clean (~500-1500ms saved)
-        # Suspicious results still escalate to full LLM scan inside scan()
-        query_scan = await self.injection_classifier.scan(query_chunk, heuristic_only=True)
+        query_scan = await self.injection_classifier.scan(query_chunk)
         ctx.scan_results.append(query_scan)
 
         if query_scan.verdict == InjectionVerdict.BLOCKED:

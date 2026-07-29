@@ -289,10 +289,21 @@ def build_validator_context(
     ]
 
 
-def build_router_context(user_query: str) -> list[dict[str, str]]:
+def build_router_context(user_query: str, conversation_context: list[dict] | None = None) -> list[dict[str, str]]:
     """
     Build context for the query router (selects entry point only).
+    Accepts conversation_context (last 1-2 turns) so follow-ups resolve accurately.
     """
+    context_text = ""
+    if conversation_context:
+        formatted_turns = []
+        for turn in conversation_context[-2:]:
+            r = turn.get("role", "user")
+            c = turn.get("content", "")
+            formatted_turns.append(f"[{r.upper()}]: {c}")
+        if formatted_turns:
+            context_text = "--- CONVERSATION CONTEXT (last 1-2 turns) ---\n" + "\n".join(formatted_turns) + "\n\n"
+
     system_prompt = (
         "You are a query router for a legal document RAG system. Your only job is\n"
         "to classify the user's message into exactly one execution path. You do\n"
@@ -310,7 +321,8 @@ def build_router_context(user_query: str) -> list[dict[str, str]]:
         "  legal-document domain.\n"
         '- "websearch_llm": the query explicitly asks for information NOT\n'
         "  contained in matter documents — public statutes, case law, SEC\n"
-        "  filings, court dockets, or other external legal research.\n\n"
+        "  filings, court dockets, or other external legal research. Use conversation\n"
+        "  context to resolve follow-up queries (e.g. 'then search the web about that').\n\n"
         'CRITICAL RULE: a short affirmative message on its own ("yes", "ok",\n'
         '"proceed", "approve", "go ahead", "do it") is NEVER, by itself, evidence\n'
         "of intent to approve or continue any pending action. Route it to\n"
@@ -327,6 +339,7 @@ def build_router_context(user_query: str) -> list[dict[str, str]]:
     )
 
     user_message = (
+        f"{context_text}"
         "--- USER MESSAGE ---\n"
         f"{user_query}"
     )
