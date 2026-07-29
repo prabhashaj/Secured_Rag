@@ -145,3 +145,39 @@ class AuditStore:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM audit_log")
             return cursor.fetchone()[0]
+
+    def export_traces_json(self) -> str:
+        """Export full audit log database as JSON string."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM audit_log ORDER BY id ASC")
+            rows = [dict(row) for row in cursor.fetchall()]
+            for r in rows:
+                try:
+                    r["payload"] = json.loads(r["payload_json"])
+                except Exception:
+                    r["payload"] = r["payload_json"]
+                del r["payload_json"]
+            return json.dumps(rows, indent=2)
+
+    def export_traces_csv(self) -> str:
+        """Export audit log summary as CSV string."""
+        import csv
+        import io
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "ID", "Trace ID", "Turn ID", "Message ID", "Timestamp",
+            "Sender", "Recipient", "Message Type", "Trust Level"
+        ])
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT id, trace_id, turn_id, message_id, timestamp, "
+                "sender, recipient, message_type, trust_level FROM audit_log ORDER BY id ASC"
+            )
+            for row in cursor.fetchall():
+                writer.writerow(row)
+
+        return output.getvalue()

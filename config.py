@@ -11,6 +11,12 @@ from pydantic import Field
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # Tavily Web Search API
+    tavily_api_key: str = Field(
+        default="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",
+        description="Tavily Web Search API key",
+    )
+
     # Mistral AI
     mistral_api_key: str = Field(..., description="Mistral API key — required, no default")
     mistral_large_model: str = Field(

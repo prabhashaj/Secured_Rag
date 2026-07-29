@@ -62,10 +62,15 @@ class InjectionClassifier:
             self._mistral_client = Mistral(api_key=settings.mistral_api_key)
         return self._mistral_client
 
-    async def scan(self, chunk: Chunk) -> InjectionScanResult:
+    async def scan(self, chunk: Chunk, heuristic_only: bool = False) -> InjectionScanResult:
         """
         Scan a single chunk for injection attempts.
         Each scan runs in isolated context — no shared state between chunks.
+
+        Args:
+            heuristic_only: If True, skip LLM layer-2 scan when heuristics pass clean.
+                           Suspicious heuristic results still escalate to LLM for confirmation.
+                           Used for user query fast-path to reduce latency.
         """
         # Layer 1: Fast heuristic scan
         heuristic_result = self._heuristic_scan(chunk)
@@ -75,6 +80,10 @@ class InjectionClassifier:
                 f"Chunk {chunk.chunk_id} BLOCKED by heuristic scan: "
                 f"{[s.value for s in heuristic_result.signals]}"
             )
+            return heuristic_result
+
+        # Fast path: if heuristic_only and heuristic says clean, skip LLM round-trip
+        if heuristic_only and heuristic_result.verdict == InjectionVerdict.CLEAN:
             return heuristic_result
 
         # Layer 2: LLM scan (for chunks that passed or were suspicious)
@@ -171,7 +180,10 @@ class InjectionClassifier:
         messages = build_classifier_context(chunk)
         client = self._get_mistral_client()
 
-        response = client.chat.complete(
+        import asyncio
+        # Offload synchronous Mistral SDK call to thread pool
+        response = await asyncio.to_thread(
+            client.chat.complete,
             model=settings.mistral_small_model,
             messages=messages,
             temperature=0.0,  # Deterministic for security classification

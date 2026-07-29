@@ -20,6 +20,7 @@ class TestPipelineState:
         """All documented transitions should succeed."""
         valid_paths = [
             (PipelineState.RECEIVED, PipelineState.RETRIEVING),
+            (PipelineState.RECEIVED, PipelineState.CLASSIFYING),  # DIRECT_LLM/WEBSEARCH_LLM path
             (PipelineState.RETRIEVING, PipelineState.CLASSIFYING),
             (PipelineState.RETRIEVING, PipelineState.FAILED),
             (PipelineState.CLASSIFYING, PipelineState.ANALYZING),
@@ -45,7 +46,7 @@ class TestPipelineState:
         """Disallowed transitions should raise InvalidTransition."""
         invalid_paths = [
             # Can't skip stages
-            (PipelineState.RECEIVED, PipelineState.ANALYZING),
+            (PipelineState.RECEIVED, PipelineState.ANALYZING),  # Must go through CLASSIFYING first
             (PipelineState.RECEIVED, PipelineState.VALIDATING),
             (PipelineState.RECEIVED, PipelineState.COMPLETE),
             (PipelineState.RETRIEVING, PipelineState.ANALYZING),
@@ -136,6 +137,36 @@ class TestPipelineState:
         ctx.transition_to(PipelineState.CLASSIFYING)
         ctx.transition_to(PipelineState.FAILED)
         assert ctx.state == PipelineState.FAILED
+
+    def test_direct_llm_happy_path(self):
+        """DIRECT_LLM path: RECEIVED → CLASSIFYING → ANALYZING → VALIDATING → COMPLETE."""
+        ctx = PipelineContext()
+        assert ctx.state == PipelineState.RECEIVED
+
+        ctx.transition_to(PipelineState.CLASSIFYING)
+        assert ctx.state == PipelineState.CLASSIFYING
+
+        ctx.transition_to(PipelineState.ANALYZING)
+        assert ctx.state == PipelineState.ANALYZING
+
+        ctx.transition_to(PipelineState.VALIDATING)
+        assert ctx.state == PipelineState.VALIDATING
+
+        ctx.transition_to(PipelineState.COMPLETE)
+        assert ctx.state == PipelineState.COMPLETE
+
+    def test_websearch_llm_happy_path(self):
+        """WEBSEARCH_LLM path: RECEIVED → CLASSIFYING → ANALYZING → VALIDATING → AWAITING_APPROVAL → EXECUTING_TOOL → COMPLETE."""
+        ctx = PipelineContext()
+        assert ctx.state == PipelineState.RECEIVED
+
+        ctx.transition_to(PipelineState.CLASSIFYING)
+        ctx.transition_to(PipelineState.ANALYZING)
+        ctx.transition_to(PipelineState.VALIDATING)
+        ctx.transition_to(PipelineState.AWAITING_APPROVAL)
+        ctx.transition_to(PipelineState.EXECUTING_TOOL)
+        ctx.transition_to(PipelineState.COMPLETE)
+        assert ctx.state == PipelineState.COMPLETE
 
 
 class TestPipelineContext:

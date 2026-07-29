@@ -84,8 +84,28 @@ const AppContent: React.FC = () => {
     setActiveTab('audit');
   };
 
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
+
+  const fetchPendingCount = async () => {
+    try {
+      const res = await fetch('/approvals/api/pending');
+      if (res.ok) {
+        const data = await res.json();
+        setPendingApprovalsCount((data || []).length);
+      }
+    } catch (e) {
+      console.error('Failed to fetch pending approvals count', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div className="app-layout min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -96,7 +116,7 @@ const AppContent: React.FC = () => {
         onDeleteSession={handleDeleteSession}
         matterId={matterId}
         setMatterId={setMatterId}
-        pendingApprovalsCount={0}
+        pendingApprovalsCount={pendingApprovalsCount}
       />
 
       <div className="main-content flex-1 ml-64 flex flex-col min-h-screen">

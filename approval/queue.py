@@ -147,6 +147,10 @@ class ApprovalQueue:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    def list_pending(self) -> list[dict]:
+        """Alias for get_pending."""
+        return self.get_pending()
+
     def get_by_id(self, approval_id: str) -> dict | None:
         """Get a specific approval request."""
         with sqlite3.connect(self.db_path) as conn:

@@ -63,9 +63,11 @@ export interface ApprovalRequest {
   trace_id: string;
   tool_name: string;
   parameters: string;
+  parameters_parsed?: Record<string, any>;
   requested_by: string;
   validated_by: string;
   originating_chunk_ids: string;
+  chunk_ids_parsed?: string[];
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
 }

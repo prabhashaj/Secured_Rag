@@ -64,3 +64,7 @@ class ToolActionResult(BaseModel):
     executed_at: str = Field(
         description="ISO8601 timestamp of execution",
     )
+
+    @property
+    def output(self) -> str:
+        return self.result_summary

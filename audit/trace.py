@@ -33,20 +33,49 @@ class TraceReconstructor:
             }
 
         stages = []
+        has_injection_risk = False
+        security_verdict = "clean"
+        user_query_preview = ""
+        overall_trust = "trusted"
+        has_retrieval = False
+        has_websearch = False
+
         for msg in messages:
+            msg_type = msg["message_type"]
+            payload = msg["payload"]
+            trust_lvl = msg["trust_level"]
+
+            if msg_type == "retrieval_result":
+                has_retrieval = True
+                user_query_preview = payload.get("query", "")
+            elif msg_type == "tool_action_request" and payload.get("tool_name") == "legal_web_search":
+                has_websearch = True
+            elif msg_type == "injection_scan_result":
+                verdict = payload.get("verdict")
+                if verdict in ("suspicious", "blocked"):
+                    has_injection_risk = True
+                    security_verdict = verdict
+
+            if trust_lvl == "untrusted":
+                overall_trust = "untrusted"
+
             stage = {
                 "step": len(stages) + 1,
                 "timestamp": msg["timestamp"],
                 "sender": msg["sender"],
                 "recipient": msg["recipient"],
-                "message_type": msg["message_type"],
-                "trust_level": msg["trust_level"],
+                "message_type": msg_type,
+                "trust_level": trust_lvl,
                 "message_id": msg["message_id"],
-                "payload_summary": self._summarize_payload(
-                    msg["message_type"], msg["payload"]
-                ),
+                "payload_summary": self._summarize_payload(msg_type, payload),
             }
             stages.append(stage)
+
+        execution_path = (
+            "websearch_llm" if has_websearch else
+            "pipeline" if has_retrieval else
+            "direct_llm"
+        )
 
         return {
             "trace_id": trace_id,
@@ -54,6 +83,11 @@ class TraceReconstructor:
             "started_at": messages[0]["timestamp"] if messages else None,
             "ended_at": messages[-1]["timestamp"] if messages else None,
             "total_steps": len(stages),
+            "user_query": user_query_preview,
+            "security_verdict": security_verdict,
+            "has_injection_risk": has_injection_risk,
+            "overall_trust": overall_trust,
+            "execution_path": execution_path,
             "stages": stages,
         }
 

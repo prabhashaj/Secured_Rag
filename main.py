@@ -37,6 +37,7 @@ from auth.routes import router as auth_router, set_user_store
 # Import tools to register them
 import tools.citation_lookup
 import tools.document_export
+import tools.legal_web_search
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -92,7 +93,7 @@ async def lifespan(app: FastAPI):
 
     # Tool-exec agent with explicit allowlist
     tool_exec_agent = ToolExecAgent(
-        allowed_tools=["citation_lookup", "document_export"]
+        allowed_tools=["citation_lookup", "document_export", "legal_web_search"]
     )
     tool_exec_agent.register_tool(
         "citation_lookup",
@@ -101,6 +102,10 @@ async def lifespan(app: FastAPI):
     tool_exec_agent.register_tool(
         "document_export",
         tools.document_export.document_export,
+    )
+    tool_exec_agent.register_tool(
+        "legal_web_search",
+        tools.legal_web_search.legal_web_search,
     )
 
     # Wire the pipeline
@@ -170,8 +175,10 @@ class QueryResponse(BaseModel):
     """Query result response."""
     trace_id: str
     status: str
+    execution_path: str | None = None
     answer: str | None = None
     claims: list[dict] | None = None
+    sources: dict[str, dict] | None = None
     error: str | None = None
 
 
@@ -193,6 +200,55 @@ async def submit_query(request: QueryRequest):
 
     logger.info(f"New query from {request.user_id}: {request.query[:100]}...")
 
+    # Check for affirmative follow-up approval (e.g. "yes", "approve", "proceed")
+    import re
+    query_clean = request.query.strip().lower()
+    is_affirmative = bool(re.search(r"^(yes|yeah|yep|ok|okay|sure|proceed|approve|go\s*ahead|do\s*it|do\s*so)\b", query_clean))
+
+    if is_affirmative and approval_queue and context_store:
+        pending_items = approval_queue.get_pending()
+        if pending_items:
+            item = pending_items[0]
+            approval_id = item["approval_id"]
+            approval_queue.approve(approval_id, approver=request.user_id)
+
+            ctx = context_store.get(item["trace_id"])
+            if ctx:
+                await pipeline.execute_approved_tool(ctx)
+                context_store.save(ctx)
+
+                answer = "Tool execution completed."
+                if ctx.tool_action_result:
+                    out = ctx.tool_action_result.output or ""
+                    answer = f"### Live Legal Web Search Results (Tavily API)\n\n{out}\n\n*Verified and executed via Human-in-the-Loop approval.*"
+
+                if request.session_id and session_store:
+                    session_store.add_message(
+                        session_id=request.session_id,
+                        role="user",
+                        content=request.query,
+                    )
+                    session_store.add_message(
+                        session_id=request.session_id,
+                        role="assistant",
+                        content=answer,
+                        trace_id=ctx.trace_id,
+                        metadata={
+                            "claims": [],
+                            "status": ctx.state.value,
+                            "error": ctx.error,
+                        },
+                    )
+
+                return QueryResponse(
+                    trace_id=ctx.trace_id,
+                    status=ctx.state.value,
+                    execution_path="websearch_llm",
+                    answer=answer,
+                    claims=[],
+                    error=ctx.error,
+                )
+
     ctx = await pipeline.run(
         user_query=request.query,
         user_id=request.user_id,
@@ -207,13 +263,29 @@ async def submit_query(request: QueryRequest):
     answer = None
     claims = None
 
-    if ctx.analysis_result and ctx.state == PipelineState.COMPLETE:
+    if ctx.analysis_result and ctx.analysis_result.answer_draft:
         answer = ctx.analysis_result.answer_draft
         claims = [c.model_dump() for c in ctx.analysis_result.claims]
+    elif ctx.tool_action_result and ctx.tool_action_result.result_summary:
+        out = ctx.tool_action_result.result_summary
+        answer = f"### Live Legal Web Search Results (Tavily API)\n\n{out}\n\n*Verified and executed via Human-in-the-Loop compliance approval.*"
     elif ctx.state == PipelineState.AWAITING_APPROVAL:
-        answer = "Tool action generated. This action requires human sign-off in the Approval Queue before execution."
+        answer = f"Live legal web search request generated for **\"{request.query}\"**. Submitted to Approval Queue for sign-off."
     elif ctx.error:
         answer = f"Pipeline stopped: {ctx.error}"
+    else:
+        answer = f"Completed processing query: '{request.query}'."
+
+    # Build sources mapping from clean_chunks
+    sources = {}
+    if ctx.clean_chunks:
+        for chunk in ctx.clean_chunks:
+            sources[chunk.chunk_id] = {
+                "title": chunk.source_doc_title,
+                "url": chunk.source_doc_id,
+                "page_ref": chunk.page_ref,
+                "is_web": chunk.matter_id == "external_web",
+            }
 
     # If session_id provided, record messages into session store
     if request.session_id and session_store:
@@ -230,16 +302,24 @@ async def submit_query(request: QueryRequest):
                 trace_id=ctx.trace_id,
                 metadata={
                     "claims": claims or [],
+                    "sources": sources,
                     "status": ctx.state.value,
                     "error": ctx.error,
                 },
             )
 
+    exec_path = "direct_llm"
+    if trace_reconstructor and ctx.trace_id:
+        trace_data = trace_reconstructor.reconstruct(ctx.trace_id)
+        exec_path = trace_data.get("execution_path", "direct_llm")
+
     return QueryResponse(
         trace_id=ctx.trace_id,
         status=ctx.state.value,
+        execution_path=exec_path,
         answer=answer,
         claims=claims,
+        sources=sources,
         error=ctx.error,
     )
 
@@ -308,6 +388,26 @@ async def list_traces():
     if not audit_store:
         raise HTTPException(status_code=503, detail="Audit system not initialized")
     return audit_store.get_all_traces()
+
+
+@app.get("/audit/export")
+async def export_audit_log(format: str = "json"):
+    """Export the entire audit log as JSON or CSV file."""
+    if not audit_store:
+        raise HTTPException(status_code=503, detail="Audit system not initialized")
+
+    if format.lower() == "csv":
+        csv_data = audit_store.export_traces_csv()
+        return JSONResponse(
+            content={"format": "csv", "data": csv_data},
+            headers={"Content-Disposition": "attachment; filename=audit_export.csv"}
+        )
+    else:
+        json_data = audit_store.export_traces_json()
+        return JSONResponse(
+            content={"format": "json", "data": json_data},
+            headers={"Content-Disposition": "attachment; filename=audit_export.json"}
+        )
 
 
 @app.post("/ingest")

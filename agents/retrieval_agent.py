@@ -55,8 +55,11 @@ class RetrievalAgent:
 
         # Embed the query
         try:
+            import asyncio
             client = self._get_mistral_client()
-            response = client.embeddings.create(
+            # Offload synchronous Mistral SDK call to thread pool
+            response = await asyncio.to_thread(
+                client.embeddings.create,
                 model=settings.mistral_embed_model,
                 inputs=[query],
             )

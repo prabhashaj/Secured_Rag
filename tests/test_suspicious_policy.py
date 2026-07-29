@@ -55,7 +55,7 @@ def mock_retrieval_with_suspicious_chunk():
 def mock_classifier():
     classifier = AsyncMock()
 
-    async def scan_side_effect(chunk):
+    async def scan_side_effect(chunk, *args, **kwargs):
         if chunk.chunk_id == "chunk_suspicious":
             return InjectionScanResult(
                 chunk_id=chunk.chunk_id,
