@@ -36,6 +36,7 @@ from orchestrator.trust_boundary import (
     TrustBoundaryViolation,
 )
 
+from agents.web_retrieval_agent import WebRetrievalAgent
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ class PipelineContext:
     user_query: str = ""
     user_id: str = ""
     user_permitted_matters: list[str] = field(default_factory=list)
+    execution_path: str = "pipeline"
 
     # Working data — populated as the pipeline progresses
     retrieval_result: RetrievalResult | None = None
@@ -128,15 +130,6 @@ class PipelineContext:
 
 
 class Pipeline:
-    """
-    Orchestrator — drives the pipeline as an explicit state machine.
-
-    Each agent is injected as a callable. The pipeline controls:
-    1. The order agents are called (fixed, not LLM-decided)
-    2. Trust boundary enforcement at every transition
-    3. Message envelope creation and audit logging
-    """
-
     def __init__(
         self,
         retrieval_agent,
@@ -144,6 +137,7 @@ class Pipeline:
         analysis_agent,
         validator_agent,
         tool_exec_agent=None,
+        web_retrieval_agent=None,
         approval_gate=None,
         audit_logger=None,
     ):
@@ -152,6 +146,7 @@ class Pipeline:
         self.analysis_agent = analysis_agent
         self.validator_agent = validator_agent
         self.tool_exec_agent = tool_exec_agent
+        self.web_retrieval_agent = web_retrieval_agent or WebRetrievalAgent()
         self.approval_gate = approval_gate
         self.audit_logger = audit_logger
 
@@ -174,10 +169,24 @@ class Pipeline:
 
         # Router decides execution path: PIPELINE, DIRECT_LLM, or WEBSEARCH_LLM
         decision = route_query(user_query)
+        ctx.execution_path = decision.path.value
         logger.info(
-            f"[trace={ctx.trace_id}] Router decision: path={decision.path.value}, "
+            f"[trace={ctx.trace_id}] Router decision: path={ctx.execution_path}, "
             f"reasoning='{decision.reasoning}'"
         )
+
+        # Log ROUTER_DECISION envelope to audit trail
+        router_envelope = create_envelope(
+            trace_id=ctx.trace_id,
+            turn_id=ctx.turn_id,
+            sender="query-router",
+            recipient="orchestrator",
+            message_type=MessageType.ROUTER_DECISION,
+            payload={"execution_path": ctx.execution_path, "reasoning": decision.reasoning},
+            trust_level=TrustLevel.TRUSTED,
+        )
+        ctx.message_log.append(router_envelope)
+        await self._log_to_audit(router_envelope)
 
         try:
             if decision.path == ExecutionPath.DIRECT_LLM:
@@ -188,118 +197,37 @@ class Pipeline:
                 await self._stage_validate(ctx)
 
             elif decision.path == ExecutionPath.WEBSEARCH_LLM:
-                # Path 3: WEBSEARCH_LLM — Scanned -> Live Tavily Search -> LLM Synthesized Response -> Validated -> COMPLETE
-                ctx.clean_chunks = []
+                # Path 3: WEBSEARCH_LLM — External Web Retrieval -> Scanned -> LLM Synthesized Response -> Validated -> COMPLETE
+                web_chunks = await self.web_retrieval_agent.search(ctx.user_query)
+
+                ctx.retrieval_result = RetrievalResult(
+                    query=ctx.user_query,
+                    chunks=web_chunks,
+                )
+
+                # Audit log web retrieval event
+                retrieval_envelope = create_envelope(
+                    trace_id=ctx.trace_id,
+                    turn_id=ctx.turn_id,
+                    sender="web-retrieval-agent",
+                    recipient="orchestrator",
+                    message_type=MessageType.RETRIEVAL_RESULT,
+                    payload=ctx.retrieval_result.model_dump(),
+                    trust_level=TrustLevel.UNTRUSTED,
+                )
+                ctx.message_log.append(retrieval_envelope)
+                await self._log_to_audit(retrieval_envelope)
+
                 await self._stage_classify(ctx)
+                if ctx.state == PipelineState.FAILED or not ctx.clean_chunks:
+                    if not ctx.error:
+                        ctx.error = "Web search content failed security scan (Malicious / Injection payload detected)."
+                    if ctx.state != PipelineState.FAILED:
+                        ctx.transition_to(PipelineState.FAILED)
+                    return ctx
 
-                if ctx.state == PipelineState.FAILED:
-                    return
-
-                # 1. Execute live Tavily web search with domain & URL extraction
-                raw_results = []
-                search_text = ""
-                if settings.tavily_api_key:
-                    try:
-                        import httpx
-                        async with httpx.AsyncClient(timeout=15.0) as client:
-                            resp = await client.post(
-                                "https://api.tavily.com/search",
-                                json={
-                                    "api_key": settings.tavily_api_key,
-                                    "query": ctx.user_query,
-                                    "search_depth": "advanced",
-                                    "max_results": 5,
-                                    "include_answer": True,
-                                },
-                            )
-                        if resp.status_code == 200:
-                            t_data = resp.json()
-                            raw_results = t_data.get("results", [])
-                            search_text = t_data.get("answer", "")
-                    except Exception as e:
-                        logger.error(f"Direct Tavily API call exception: {e}")
-
-                # Fallback to tool exec agent if direct call didn't return results
-                if not raw_results and self.tool_exec_agent:
-                    try:
-                        search_req = ToolActionRequest(
-                            tool_name="legal_web_search",
-                            parameters={"query": ctx.user_query},
-                            requested_by="orchestrator",
-                            validated_by="system",
-                            requires_human_approval=False,
-                        )
-                        search_res = await self.tool_exec_agent.execute(search_req)
-                        ctx.tool_action_result = search_res
-                        if search_res and search_res.result_summary:
-                            search_text = search_res.result_summary
-                    except Exception as e:
-                        logger.error(f"Live web search failed: {e}")
-
-                # 2. Build individual web chunks per domain & URL
-                web_chunks = []
-                if raw_results:
-                    from urllib.parse import urlparse
-                    for idx, res in enumerate(raw_results, 1):
-                        url = res.get("url", "#")
-                        title = res.get("title", "Legal Reference")
-                        content = res.get("content", "").strip()
-                        parsed_url = urlparse(url)
-                        domain = parsed_url.netloc or "web_source"
-                        if domain.startswith("www."):
-                            domain = domain[4:]
-
-                        clean_domain_tag = domain.replace('.', '_').replace('-', '_')
-                        chunk_id = f"web_{clean_domain_tag}_{idx}"
-                        w_chunk = Chunk(
-                            chunk_id=chunk_id,
-                            source_doc_id=url,
-                            source_doc_title=domain,
-                            matter_id="external_web",
-                            confidentiality_tag="public",
-                            page_ref=url,
-                            text=f"Source URL: {url}\nWebsite Domain: {domain}\nDocument Title: {title}\nContent Snippet: {content}",
-                            embedding_score=1.0,
-                            acl_check_passed=True,
-                        )
-                        web_chunks.append(w_chunk)
-                else:
-                    web_chunks.append(
-                        Chunk(
-                            chunk_id="web_source_online_1",
-                            source_doc_id="https://api.tavily.com",
-                            source_doc_title="Online Legal Search",
-                            matter_id="external_web",
-                            confidentiality_tag="public",
-                            page_ref="live_web",
-                            text=search_text or f"Live Tavily web search executed for '{ctx.user_query}'.",
-                            embedding_score=1.0,
-                            acl_check_passed=True,
-                        )
-                    )
-
-                # 3. Security Scan each web chunk via InjectionClassifier
-                clean_web_chunks = []
-                for w_chunk in web_chunks:
-                    web_scan = await self.injection_classifier.scan(w_chunk)
-                    ctx.scan_results.append(web_scan)
-                    if web_scan.verdict != InjectionVerdict.BLOCKED:
-                        clean_web_chunks.append(w_chunk)
-
-                if not clean_web_chunks:
-                    logger.warning(f"[trace={ctx.trace_id}] All web search results BLOCKED by injection classifier")
-                    ctx.error = "Web search content failed security scan (Malicious / Injection payload detected)."
-                    ctx.transition_to(PipelineState.FAILED)
-                    return
-
-                ctx.clean_chunks = clean_web_chunks
-
-                # 3. Analyze search results & synthesize comprehensive answer
                 await self._stage_analyze(ctx, session_memory)
                 await self._stage_validate(ctx)
-
-                if ctx.state != PipelineState.FAILED:
-                    ctx.transition_to(PipelineState.COMPLETE)
 
             else:
                 # Path 1: PIPELINE — Internal Vector RAG Pipeline over matter docs
@@ -526,17 +454,12 @@ class Pipeline:
             for claim in ctx.analysis_result.claims:
                 originating_chunk_ids.extend(claim.supporting_chunk_ids)
 
-            # Web search never requires human approval per plan directive
-            requires_approval = True
-            if action.tool_name == "legal_web_search":
-                requires_approval = False
-
             ctx.tool_action_request = ToolActionRequest(
                 tool_name=action.tool_name,
                 parameters={"query": ctx.user_query},
                 requested_by="analysis-agent",
                 validated_by="validator-agent",
-                requires_human_approval=requires_approval,
+                requires_human_approval=True,
                 originating_chunk_ids=list(set(originating_chunk_ids)),
             )
 
@@ -564,7 +487,7 @@ class Pipeline:
             ctx.message_log.append(tool_envelope)
             await self._log_to_audit(tool_envelope)
 
-            if requires_approval:
+            if ctx.tool_action_request.requires_human_approval:
                 ctx.transition_to(PipelineState.AWAITING_APPROVAL)
             else:
                 ctx.transition_to(PipelineState.EXECUTING_TOOL)
@@ -630,25 +553,6 @@ class Pipeline:
         )
         ctx.message_log.append(envelope)
         await self._log_to_audit(envelope)
-
-        # If web search executed, synthesize analysis answer from search output
-        if ctx.tool_action_request and ctx.tool_action_request.tool_name == "legal_web_search" and result and result.result_summary:
-            web_chunk = Chunk(
-                chunk_id="web_source_online_1",
-                source_doc_id="https://api.tavily.com",
-                source_doc_title="Online Legal Search",
-                matter_id="external_web",
-                confidentiality_tag="public",
-                page_ref="live_web",
-                text=result.result_summary,
-                embedding_score=1.0,
-                acl_check_passed=True,
-            )
-            web_scan = await self.injection_classifier.scan(web_chunk)
-            ctx.scan_results.append(web_scan)
-            if web_scan.verdict != InjectionVerdict.BLOCKED:
-                ctx.clean_chunks = [web_chunk]
-                await self._stage_analyze(ctx, None)
 
         ctx.transition_to(PipelineState.COMPLETE)
 

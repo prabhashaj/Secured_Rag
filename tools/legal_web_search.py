@@ -1,8 +1,10 @@
 """
 Legal Web Search tool — external legal research tool powered by Tavily Web Search API.
 
-Requires Human-In-The-Loop (HITL) compliance approval before execution.
-Searches public court dockets, statutory codes, SEC filings, and regulatory updates across external legal databases.
+Operates in the untrusted retrieval zone as a second retrieval source.
+Retrieved search snippets are wrapped into Chunks, scanned by the InjectionClassifier,
+analyzed by the AnalysisAgent, and validated by the ValidatorAgent.
+Does NOT enter the privileged tool execution zone or approval queue.
 """
 
 from __future__ import annotations
@@ -25,12 +27,12 @@ TAVILY_API_URL = "https://api.tavily.com/search"
         "query": {"type": "string", "required": True, "description": "Legal query or statutory citation to search"},
         "category": {"type": "string", "required": False, "description": "Search category e.g. regulatory, statutory, SEC, court_dockets"},
     },
-    requires_human_approval=False,  # Automated web search per user plan directive
+    requires_human_approval=False,
 )
 async def legal_web_search(parameters: dict) -> str:
     """
     Perform external legal search across public dockets and statutory databases via Tavily API.
-    Requires explicit compliance officer authorization before execution.
+    Executed in the untrusted zone as a retrieval source; snippets undergo security classification and validation.
     """
     query = parameters.get("query", "")
     category = parameters.get("category", "regulatory")

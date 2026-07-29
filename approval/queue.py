@@ -25,9 +25,12 @@ class ApprovalQueue:
         self.db_path = db_path
         self._init_db()
 
+    def _get_conn(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+
     def _init_db(self) -> None:
         """Initialize the approval queue table."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS approval_queue (
                     approval_id TEXT PRIMARY KEY,
@@ -66,7 +69,7 @@ class ApprovalQueue:
         approval_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO approval_queue
@@ -96,7 +99,7 @@ class ApprovalQueue:
     def approve(self, approval_id: str, approver: str) -> bool:
         """Approve a pending request."""
         now = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             result = conn.execute(
                 """
                 UPDATE approval_queue
@@ -116,7 +119,7 @@ class ApprovalQueue:
     ) -> bool:
         """Reject a pending request."""
         now = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             result = conn.execute(
                 """
                 UPDATE approval_queue
@@ -136,7 +139,7 @@ class ApprovalQueue:
 
     def get_pending(self) -> list[dict]:
         """Get all pending approval requests."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -153,7 +156,7 @@ class ApprovalQueue:
 
     def get_by_id(self, approval_id: str) -> dict | None:
         """Get a specific approval request."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM approval_queue WHERE approval_id = ?",
@@ -164,7 +167,7 @@ class ApprovalQueue:
 
     def get_by_trace(self, trace_id: str) -> list[dict]:
         """Get all approval requests for a trace."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM approval_queue WHERE trace_id = ? ORDER BY created_at",

@@ -32,6 +32,7 @@ class MessageType(str, Enum):
     VALIDATION_VERDICT = "validation_verdict"
     TOOL_ACTION_REQUEST = "tool_action_request"
     TOOL_ACTION_RESULT = "tool_action_result"
+    ROUTER_DECISION = "router_decision"
     USER_QUERY = "user_query"
     PIPELINE_ERROR = "pipeline_error"
 

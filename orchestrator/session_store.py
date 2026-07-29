@@ -23,9 +23,12 @@ class ChatSessionStore:
         self.db_path = db_path
         self._init_db()
 
+    def _get_conn(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+
     def _init_db(self) -> None:
         """Initialize chat_sessions and chat_messages tables."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     session_id TEXT PRIMARY KEY,
@@ -64,7 +67,7 @@ class ChatSessionStore:
         session_id = f"session_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO chat_sessions (session_id, title, user_id, active_matter_id, created_at, updated_at)
@@ -85,7 +88,7 @@ class ChatSessionStore:
 
     def list_sessions(self, user_id: str = "default_user") -> list[dict[str, Any]]:
         """List all chat sessions for a user ordered by updated_at descending."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -99,7 +102,7 @@ class ChatSessionStore:
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Get session metadata by session_id."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM chat_sessions WHERE session_id = ?",
@@ -110,7 +113,7 @@ class ChatSessionStore:
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a chat session and its messages."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
             cursor = conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
             conn.commit()
@@ -129,7 +132,14 @@ class ChatSessionStore:
         now = datetime.now(timezone.utc).isoformat()
         metadata_json = json.dumps(metadata or {})
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO chat_sessions (session_id, title, user_id, active_matter_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, content[:30] + "...", "default_user", "general", now, now),
+            )
             conn.execute(
                 """
                 INSERT INTO chat_messages (message_id, session_id, role, content, trace_id, metadata_json, timestamp)
@@ -156,7 +166,7 @@ class ChatSessionStore:
 
     def get_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Get all message turns in chronological order for a session."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """

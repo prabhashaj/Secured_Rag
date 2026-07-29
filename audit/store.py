@@ -23,9 +23,12 @@ class AuditStore:
         self.db_path = db_path
         self._init_db()
 
+    def _get_conn(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+
     def _init_db(self) -> None:
         """Initialize the audit log table."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +63,7 @@ class AuditStore:
         This is INSERT-ONLY — no UPDATE or DELETE operations.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_conn() as conn:
                 conn.execute(
                     """
                     INSERT INTO audit_log
@@ -94,7 +97,7 @@ class AuditStore:
         Reconstruct the full trace for a given trace_id.
         Returns all messages in chronological order.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -124,7 +127,7 @@ class AuditStore:
 
     def get_all_traces(self) -> list[dict]:
         """Get a summary of all traces."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -142,13 +145,13 @@ class AuditStore:
 
     def count(self) -> int:
         """Count total audit log entries."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM audit_log")
             return cursor.fetchone()[0]
 
     def export_traces_json(self) -> str:
         """Export full audit log database as JSON string."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM audit_log ORDER BY id ASC")
             rows = [dict(row) for row in cursor.fetchall()]
@@ -172,7 +175,7 @@ class AuditStore:
             "Sender", "Recipient", "Message Type", "Trust Level"
         ])
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             cursor = conn.execute(
                 "SELECT id, trace_id, turn_id, message_id, timestamp, "
                 "sender, recipient, message_type, trust_level FROM audit_log ORDER BY id ASC"

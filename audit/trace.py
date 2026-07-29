@@ -40,14 +40,21 @@ class TraceReconstructor:
         has_retrieval = False
         has_websearch = False
 
+        recorded_path = None
         for msg in messages:
             msg_type = msg["message_type"]
             payload = msg["payload"]
             trust_lvl = msg["trust_level"]
 
-            if msg_type == "retrieval_result":
+            if msg_type == "router_decision":
+                recorded_path = payload.get("execution_path")
+            elif msg_type == "retrieval_result":
                 has_retrieval = True
-                user_query_preview = payload.get("query", "")
+                if not user_query_preview:
+                    user_query_preview = payload.get("query", "")
+                chunks = payload.get("chunks", [])
+                if any(c.get("matter_id") == "external_web" for c in chunks):
+                    has_websearch = True
             elif msg_type == "tool_action_request" and payload.get("tool_name") == "legal_web_search":
                 has_websearch = True
             elif msg_type == "injection_scan_result":
@@ -72,9 +79,10 @@ class TraceReconstructor:
             stages.append(stage)
 
         execution_path = (
-            "websearch_llm" if has_websearch else
-            "pipeline" if has_retrieval else
-            "direct_llm"
+            recorded_path if recorded_path else
+            ("websearch_llm" if has_websearch else
+             "pipeline" if has_retrieval else
+             "direct_llm")
         )
 
         return {

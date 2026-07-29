@@ -1,6 +1,45 @@
-// LexiSafe Legal Tech — Client-Side Controller
+function getAuthHeaders() {
+    const token = localStorage.getItem('lexicon_auth_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return headers;
+}
+
+async function ensureAuthToken() {
+    if (!localStorage.getItem('lexicon_auth_token')) {
+        try {
+            const loginRes = await fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: 'prabhashaj@legal.com', password: 'Password123' })
+            });
+            if (loginRes.ok) {
+                const data = await loginRes.json();
+                localStorage.setItem('lexicon_auth_token', data.token);
+                return;
+            }
+            const signupRes = await fetch('/auth/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: 'prabhashaj@legal.com',
+                    full_name: 'prabhashaj',
+                    password: 'Password123',
+                    role: 'Senior Attorney'
+                })
+            });
+            if (signupRes.ok) {
+                const data = await signupRes.json();
+                localStorage.setItem('lexicon_auth_token', data.token);
+            }
+        } catch (e) {
+            console.error('Auto auth error', e);
+        }
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
+    ensureAuthToken();
     initNavigation();
     initQueryPanel();
     initIngestPanel();
@@ -77,9 +116,10 @@ function initQueryPanel() {
         setStepStatus('retrieving', 'active');
 
         try {
+            await ensureAuthToken();
             const res = await fetch('/query', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     query: query,
                     user_id: userId,

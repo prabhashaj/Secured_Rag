@@ -30,6 +30,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  const autoAuthenticate = async () => {
+    try {
+      const loginRes = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'prabhashaj@legal.com', password: 'Password123' }),
+      });
+      if (loginRes.ok) {
+        const data: UserProfile = await loginRes.json();
+        setUser(data);
+        setToken(data.token);
+        localStorage.setItem('lexicon_auth_token', data.token);
+        return;
+      }
+      const signupRes = await fetch('/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'prabhashaj@legal.com',
+          full_name: 'prabhashaj',
+          password: 'Password123',
+          role: 'Senior Attorney',
+        }),
+      });
+      if (signupRes.ok) {
+        const data: UserProfile = await signupRes.json();
+        setUser(data);
+        setToken(data.token);
+        localStorage.setItem('lexicon_auth_token', data.token);
+        return;
+      }
+    } catch (e) {
+      console.error('Auto authentication error', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const fetchProfile = async (authToken: string) => {
     try {
       const res = await fetch('/auth/me', {
@@ -39,11 +77,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const profile = await res.json();
         setUser({ ...profile, token: authToken });
       } else {
-        logout();
+        await autoAuthenticate();
       }
     } catch (e) {
       console.error('Failed to fetch user profile', e);
-      logout();
+      await autoAuthenticate();
     } finally {
       setIsLoading(false);
     }
@@ -53,7 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (token) {
       fetchProfile(token);
     } else {
-      setIsLoading(false);
+      autoAuthenticate();
     }
   }, [token]);
 

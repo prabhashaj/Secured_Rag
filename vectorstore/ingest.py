@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Injection patterns for ingestion-time scanning
 INJECTION_PATTERNS = [
     # Instruction-like phrases
-    (r"(?i)ignore\s+(all\s+)?previous\s+instructions?", "instruction_like_phrase"),
+    (r"(?i)ignore\s+(all\s+)?(prior|previous|above)\s+instructions?", "instruction_like_phrase"),
     (r"(?i)you\s+are\s+now\s+a?\s*", "instruction_like_phrase"),
     (r"(?i)your\s+new\s+(role|instructions?|task)", "instruction_like_phrase"),
     (r"(?i)disregard\s+(all\s+)?(prior|above|previous)", "instruction_like_phrase"),

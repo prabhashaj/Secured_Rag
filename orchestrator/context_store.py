@@ -36,9 +36,12 @@ class PipelineContextStore:
         self._cache: OrderedDict[str, PipelineContext] = OrderedDict()
         self._init_db()
 
+    def _get_conn(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+
     def _init_db(self) -> None:
         """Initialize the pipeline_contexts table."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS pipeline_contexts (
                     trace_id TEXT PRIMARY KEY,
@@ -110,7 +113,7 @@ class PipelineContextStore:
         )
         msg_log_json = json.dumps([m.model_dump() for m in ctx.message_log])
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO pipeline_contexts (
@@ -164,7 +167,7 @@ class PipelineContextStore:
             self._cache.move_to_end(trace_id)
             return self._cache[trace_id]
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM pipeline_contexts WHERE trace_id = ?", (trace_id,)
@@ -186,7 +189,7 @@ class PipelineContextStore:
         more than `hours` ago. Returns count of purged records.
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_conn() as conn:
             cursor = conn.execute(
                 """
                 DELETE FROM pipeline_contexts

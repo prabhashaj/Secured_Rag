@@ -11,7 +11,7 @@ import uuid
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -30,9 +30,10 @@ from approval.queue import ApprovalQueue
 from approval.routes import router as approval_router, init_routes
 from orchestrator.context_store import PipelineContextStore
 from orchestrator.session_store import ChatSessionStore
+from orchestrator.query_cache import query_cache
 from tools.file_extractor import extract_text_from_file
 from auth.store import UserStore
-from auth.routes import router as auth_router, set_user_store
+from auth.routes import router as auth_router, admin_router, set_user_store, get_current_user_dep
 
 # Import tools to register them
 import tools.citation_lookup
@@ -91,9 +92,9 @@ async def lifespan(app: FastAPI):
     analysis_agent = AnalysisAgent()
     validator_agent = ValidatorAgent()
 
-    # Tool-exec agent with explicit allowlist
+    # Tool-exec agent with explicit allowlist (privileged zone — web search is in untrusted retrieval zone)
     tool_exec_agent = ToolExecAgent(
-        allowed_tools=["citation_lookup", "document_export", "legal_web_search"]
+        allowed_tools=["citation_lookup", "document_export"]
     )
     tool_exec_agent.register_tool(
         "citation_lookup",
@@ -102,10 +103,6 @@ async def lifespan(app: FastAPI):
     tool_exec_agent.register_tool(
         "document_export",
         tools.document_export.document_export,
-    )
-    tool_exec_agent.register_tool(
-        "legal_web_search",
-        tools.legal_web_search.legal_web_search,
     )
 
     # Wire the pipeline
@@ -147,6 +144,7 @@ if os.path.exists("ui/dist"):
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(approval_router)
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 @app.get("/", response_class=FileResponse)
@@ -193,66 +191,35 @@ class IngestRequest(BaseModel):
 # --- API Endpoints ---
 
 @app.post("/query", response_model=QueryResponse)
-async def submit_query(request: QueryRequest):
-    """Submit a user query — starts the full pipeline."""
+async def submit_query(
+    request: QueryRequest,
+    current_user: dict = Depends(get_current_user_dep),
+):
+    """Submit a user query — starts the full pipeline with token-derived user identity and ACL permissions."""
     if not pipeline:
         raise HTTPException(status_code=503, detail="System not initialized")
 
-    logger.info(f"New query from {request.user_id}: {request.query[:100]}...")
+    # Derive identity and matter permissions strictly from verified token
+    user_id = current_user["user_id"]
+    permitted_matters = current_user.get("permitted_matters", [])
 
-    # Check for affirmative follow-up approval (e.g. "yes", "approve", "proceed")
-    import re
-    query_clean = request.query.strip().lower()
-    is_affirmative = bool(re.search(r"^(yes|yeah|yep|ok|okay|sure|proceed|approve|go\s*ahead|do\s*it|do\s*so)\b", query_clean))
+    if request.user_id and request.user_id != user_id:
+        logger.warning(f"Client user_id '{request.user_id}' does not match authenticated token '{user_id}'. Ignoring body value.")
 
-    if is_affirmative and approval_queue and context_store:
-        pending_items = approval_queue.get_pending()
-        if pending_items:
-            item = pending_items[0]
-            approval_id = item["approval_id"]
-            approval_queue.approve(approval_id, approver=request.user_id)
+    if request.permitted_matters and request.permitted_matters != permitted_matters:
+        logger.warning(f"Client permitted_matters '{request.permitted_matters}' does not match authenticated token matters '{permitted_matters}'. Ignoring body value.")
 
-            ctx = context_store.get(item["trace_id"])
-            if ctx:
-                await pipeline.execute_approved_tool(ctx)
-                context_store.save(ctx)
+    # Task 6: Check query result cache
+    cached_resp = query_cache.get(user_id, permitted_matters, request.query)
+    if cached_resp:
+        return cached_resp
 
-                answer = "Tool execution completed."
-                if ctx.tool_action_result:
-                    out = ctx.tool_action_result.output or ""
-                    answer = f"### Live Legal Web Search Results (Tavily API)\n\n{out}\n\n*Verified and executed via Human-in-the-Loop approval.*"
-
-                if request.session_id and session_store:
-                    session_store.add_message(
-                        session_id=request.session_id,
-                        role="user",
-                        content=request.query,
-                    )
-                    session_store.add_message(
-                        session_id=request.session_id,
-                        role="assistant",
-                        content=answer,
-                        trace_id=ctx.trace_id,
-                        metadata={
-                            "claims": [],
-                            "status": ctx.state.value,
-                            "error": ctx.error,
-                        },
-                    )
-
-                return QueryResponse(
-                    trace_id=ctx.trace_id,
-                    status=ctx.state.value,
-                    execution_path="websearch_llm",
-                    answer=answer,
-                    claims=[],
-                    error=ctx.error,
-                )
+    logger.info(f"New query from {user_id}: {request.query[:100]}...")
 
     ctx = await pipeline.run(
         user_query=request.query,
-        user_id=request.user_id,
-        user_permitted_matters=request.permitted_matters,
+        user_id=user_id,
+        user_permitted_matters=permitted_matters,
     )
 
     # Store context for status lookups and approval resumption
@@ -287,6 +254,8 @@ async def submit_query(request: QueryRequest):
                 "is_web": chunk.matter_id == "external_web",
             }
 
+    exec_path = getattr(ctx, "execution_path", "pipeline")
+
     # If session_id provided, record messages into session store
     if request.session_id and session_store:
         session_store.add_message(
@@ -304,16 +273,12 @@ async def submit_query(request: QueryRequest):
                     "claims": claims or [],
                     "sources": sources,
                     "status": ctx.state.value,
+                    "execution_path": exec_path,
                     "error": ctx.error,
                 },
             )
 
-    exec_path = "direct_llm"
-    if trace_reconstructor and ctx.trace_id:
-        trace_data = trace_reconstructor.reconstruct(ctx.trace_id)
-        exec_path = trace_data.get("execution_path", "direct_llm")
-
-    return QueryResponse(
+    response_obj = QueryResponse(
         trace_id=ctx.trace_id,
         status=ctx.state.value,
         execution_path=exec_path,
@@ -323,9 +288,14 @@ async def submit_query(request: QueryRequest):
         error=ctx.error,
     )
 
+    if ctx.state == PipelineState.COMPLETE:
+        query_cache.set(user_id, permitted_matters, request.query, response_obj)
+
+    return response_obj
+
 
 @app.get("/query/{trace_id}/status")
-async def query_status(trace_id: str):
+async def query_status(trace_id: str, current_user: dict = Depends(get_current_user_dep)):
     """Check pipeline status for a query."""
     ctx = context_store.get(trace_id) if context_store else None
     if not ctx:
@@ -341,7 +311,7 @@ async def query_status(trace_id: str):
 
 
 @app.get("/query/{trace_id}/result")
-async def query_result(trace_id: str):
+async def query_result(trace_id: str, current_user: dict = Depends(get_current_user_dep)):
     """Get the final result for a query."""
     ctx = context_store.get(trace_id) if context_store else None
     if not ctx:
@@ -370,7 +340,7 @@ async def query_result(trace_id: str):
 
 
 @app.get("/audit/trace/{trace_id}")
-async def get_audit_trace(trace_id: str):
+async def get_audit_trace(trace_id: str, current_user: dict = Depends(get_current_user_dep)):
     """Reconstruct the full audit trace for a pipeline run."""
     if not trace_reconstructor:
         raise HTTPException(status_code=503, detail="Audit system not initialized")
@@ -383,7 +353,7 @@ async def get_audit_trace(trace_id: str):
 
 
 @app.get("/audit/traces")
-async def list_traces():
+async def list_traces(current_user: dict = Depends(get_current_user_dep)):
     """List all audit traces."""
     if not audit_store:
         raise HTTPException(status_code=503, detail="Audit system not initialized")
@@ -391,7 +361,7 @@ async def list_traces():
 
 
 @app.get("/audit/export")
-async def export_audit_log(format: str = "json"):
+async def export_audit_log(format: str = "json", current_user: dict = Depends(get_current_user_dep)):
     """Export the entire audit log as JSON or CSV file."""
     if not audit_store:
         raise HTTPException(status_code=503, detail="Audit system not initialized")
@@ -411,10 +381,21 @@ async def export_audit_log(format: str = "json"):
 
 
 @app.post("/ingest")
-async def ingest_doc(request: IngestRequest):
-    """Ingest a document into the vector store."""
+async def ingest_doc(
+    request: IngestRequest,
+    current_user: dict = Depends(get_current_user_dep),
+):
+    """Ingest a document into the vector store with matter authorization check (Task 3)."""
     if not vector_store:
         raise HTTPException(status_code=503, detail="System not initialized")
+
+    user_matters = current_user.get("permitted_matters", [])
+    user_role = current_user.get("role", "")
+    if request.matter_id not in user_matters and user_role not in ("admin", "Compliance Auditor"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"User '{current_user['user_id']}' is not authorized to ingest into matter '{request.matter_id}'"
+        )
 
     doc_id = f"doc_{uuid.uuid4().hex[:8]}"
 
@@ -443,10 +424,19 @@ async def ingest_file(
     matter_id: str = Form(...),
     confidentiality_tag: str = Form(default="public"),
     title: str | None = Form(default=None),
+    current_user: dict = Depends(get_current_user_dep),
 ):
-    """Ingest a multi-format document (PDF, DOCX, TXT, MD, CSV, JSON) into vector store."""
+    """Ingest a multi-format document into vector store with matter authorization check (Task 3)."""
     if not vector_store:
         raise HTTPException(status_code=503, detail="System not initialized")
+
+    user_matters = current_user.get("permitted_matters", [])
+    user_role = current_user.get("role", "")
+    if matter_id not in user_matters and user_role not in ("admin", "Compliance Auditor"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"User '{current_user['user_id']}' is not authorized to ingest into matter '{matter_id}'"
+        )
 
     contents = await file.read()
     doc_title = title or file.filename or "Uploaded Document"
@@ -479,36 +469,44 @@ async def ingest_file(
 
 class CreateSessionRequest(BaseModel):
     title: str = "New Legal Chat"
-    user_id: str = "default_user"
+    user_id: str | None = Field(default=None, description="Deprecated client user_id (ignored, derived from token)")
     active_matter_id: str | None = None
 
 
 @app.get("/sessions")
-async def list_user_sessions(user_id: str = "default_user"):
-    """List chat sessions for user."""
+async def list_user_sessions(current_user: dict = Depends(get_current_user_dep)):
+    """List chat sessions for user derived from Bearer token."""
     if not session_store:
         raise HTTPException(status_code=503, detail="Session store not initialized")
-    return session_store.list_sessions(user_id=user_id)
+    return session_store.list_sessions(user_id=current_user["user_id"])
 
 
 @app.post("/sessions")
-async def create_chat_session(req: CreateSessionRequest):
-    """Create a new chat session."""
+async def create_chat_session(
+    req: CreateSessionRequest,
+    current_user: dict = Depends(get_current_user_dep),
+):
+    """Create a new chat session bound to authenticated user."""
     if not session_store:
         raise HTTPException(status_code=503, detail="Session store not initialized")
     return session_store.create_session(
-        title=req.title, user_id=req.user_id, active_matter_id=req.active_matter_id
+        title=req.title, user_id=current_user["user_id"], active_matter_id=req.active_matter_id
     )
 
 
 @app.get("/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(
+    session_id: str,
+    current_user: dict = Depends(get_current_user_dep),
+):
     """Get messages for a chat session."""
     if not session_store:
         raise HTTPException(status_code=503, detail="Session store not initialized")
     session = session_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("user_id") != current_user["user_id"] and current_user.get("role") not in ("admin", "Compliance Auditor"):
+        raise HTTPException(status_code=403, detail="Unauthorized access to chat session")
     return {
         "session": session,
         "messages": session_store.get_messages(session_id),
@@ -516,10 +514,18 @@ async def get_session_messages(session_id: str):
 
 
 @app.delete("/sessions/{session_id}")
-async def delete_chat_session(session_id: str):
+async def delete_chat_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user_dep),
+):
     """Delete a chat session."""
     if not session_store:
         raise HTTPException(status_code=503, detail="Session store not initialized")
+    session = session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("user_id") != current_user["user_id"] and current_user.get("role") not in ("admin", "Compliance Auditor"):
+        raise HTTPException(status_code=403, detail="Unauthorized access to chat session")
     success = session_store.delete_session(session_id)
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -527,7 +533,7 @@ async def delete_chat_session(session_id: str):
 
 
 @app.get("/documents")
-async def list_documents():
+async def list_documents(current_user: dict = Depends(get_current_user_dep)):
     """List all ingested documents summary from vector store."""
     if not vector_store:
         raise HTTPException(status_code=503, detail="System not initialized")
@@ -535,7 +541,10 @@ async def list_documents():
 
 
 @app.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str):
+async def delete_document(
+    doc_id: str,
+    current_user: dict = Depends(get_current_user_dep),
+):
     """Delete a document and all its chunks from vector store."""
     if not vector_store:
         raise HTTPException(status_code=503, detail="System not initialized")

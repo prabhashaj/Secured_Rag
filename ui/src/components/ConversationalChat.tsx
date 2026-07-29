@@ -224,9 +224,19 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const getAuthHeaders = (): Record<string, string> => {
+    const token = localStorage.getItem('lexicon_auth_token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  };
+
   const fetchMessages = async (sessionId: string) => {
     try {
-      const res = await fetch(`/sessions/${sessionId}/messages`);
+      const res = await fetch(`/sessions/${sessionId}/messages`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -252,7 +262,9 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     try {
       let targetTraceId = traceId;
       if (!targetTraceId) {
-        const pendingRes = await fetch('/approvals/api/pending');
+        const pendingRes = await fetch('/approvals/api/pending', {
+          headers: getAuthHeaders(),
+        });
         if (pendingRes.ok) {
           const items = await pendingRes.json();
           if (items.length > 0) {
@@ -269,6 +281,7 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
       setExecutingTraceId(targetTraceId);
       const res = await fetch(`/approvals/api/trace/${targetTraceId}/approve`, {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -312,13 +325,16 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
   const handleInlineReject = async (traceId: string) => {
     setExecutingTraceId(traceId);
     try {
-      const pendingRes = await fetch('/approvals/api/pending');
+      const pendingRes = await fetch('/approvals/api/pending', {
+        headers: getAuthHeaders(),
+      });
       if (pendingRes.ok) {
         const pendingItems = await pendingRes.json();
         const match = pendingItems.find((item: any) => item.trace_id === traceId);
         if (match) {
           const appRes = await fetch(`/approvals/api/${match.approval_id}/reject`, {
             method: 'POST',
+            headers: getAuthHeaders(),
           });
           if (appRes.ok && activeSessionId) {
             await fetchMessages(activeSessionId);
@@ -340,7 +356,7 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     if (!targetSessionId) {
       const res = await fetch('/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           title: query.slice(0, 30) + '...',
           user_id: 'default_user',
@@ -371,7 +387,7 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
     try {
       const res = await fetch('/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           query: userText,
           user_id: 'default_user',
@@ -458,8 +474,9 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
             const isUser = msg.role === 'user';
             const claims = msg.metadata?.claims || [];
             const traceId = msg.trace_id;
+            const execPath = (msg.metadata as any)?.execution_path;
             const isAwaitingApproval = (msg.metadata?.status === 'awaiting_approval' || msg.content.includes('Approval Queue')) && !msg.content.includes('real-time legal web search') && !msg.content.includes('web search') && !msg.content.includes('legal_web_search');
-            const isWebSearch = (msg.metadata as any)?.execution_path === 'websearch_llm' || msg.content.includes('Tavily API') || msg.content.includes('legal_web_search');
+            const isWebSearch = execPath === 'websearch_llm' || msg.content.includes('Tavily API') || msg.content.includes('legal_web_search') || Object.values((msg.metadata as any)?.sources || {}).some((s: any) => s?.is_web || (s?.url && s.url.startsWith('http')));
 
             return (
               <div
@@ -490,9 +507,17 @@ export const ConversationalChat: React.FC<ConversationalChatProps> = ({
                           <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-md text-xs font-bold flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5 text-amber-600" /> Action Approval Pending
                           </span>
-                        ) : isWebSearch ? (
+                        ) : execPath === 'websearch_llm' || isWebSearch ? (
                           <span className="px-2.5 py-0.5 bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-md text-xs font-bold flex items-center gap-1">
                             <Globe className="w-3.5 h-3.5 text-indigo-600" /> Live Legal Web Search
+                          </span>
+                        ) : execPath === 'pipeline' ? (
+                          <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md text-xs font-bold flex items-center gap-1">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Matter Vector RAG
+                          </span>
+                        ) : execPath === 'direct_llm' ? (
+                          <span className="px-2.5 py-0.5 bg-brand-100/70 text-brand-900 border border-brand-200 rounded-md text-xs font-bold flex items-center gap-1">
+                            <Sparkles className="w-3.5 h-3.5 text-brand-600" /> Direct LLM
                           </span>
                         ) : claims.length > 0 ? (
                           <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md text-xs font-bold flex items-center gap-1">

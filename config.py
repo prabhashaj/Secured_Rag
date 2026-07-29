@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     # Mistral AI
     mistral_api_key: str = Field(..., description="Mistral API key — required, no default")
+    jwt_secret_key: str = Field(..., description="JWT secret key for auth token signing — required, no default")
     mistral_large_model: str = Field(
         default="mistral-large-latest",
         description="Model for analysis and validation agents",
